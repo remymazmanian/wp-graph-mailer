@@ -14,6 +14,8 @@ If your domain's mail lives in Microsoft 365, your WordPress server does not nee
 
 ## Setup
 
+Prefer it as a web page? The same walkthrough lives at [remymazmanian.com/wordpress-email-microsoft-365-guide](https://remymazmanian.com/wordpress-email-microsoft-365-guide/).
+
 The settings screen carries a live checklist that ticks itself off, and this is the long form:
 
 1. **Register an application** — Microsoft Entra admin center → App registrations → New registration. Single tenant, no redirect URI. Copy the **Directory (tenant) ID** and **Application (client) ID**.
