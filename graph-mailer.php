@@ -357,6 +357,25 @@ final class Graph_Mailer {
 			.gm-steps li::before{content:counter(gm);position:absolute;left:0;top:6px;width:20px;height:20px;border-radius:50%;text-align:center;line-height:20px;font-size:11px;font-weight:600;background:#f0f0f1;color:#646970;}
 			.gm-step-done{color:#646970;text-decoration:line-through;text-decoration-color:#c3c4c7;}
 			.gm-step-done::before{content:"\2713" !important;background:#00701a !important;color:#fff !important;}
+			.gm-guide{margin-bottom:20px;}
+			.gm-guide-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;}
+			.gm-guide-head h2{padding:0;border:0;}
+			.gm-switch{position:relative;display:inline-block;width:40px;height:22px;flex:none;}
+			.gm-switch input{opacity:0;width:0;height:0;}
+			.gm-slider{position:absolute;cursor:pointer;inset:0;background:#c3c4c7;border-radius:22px;transition:.25s;}
+			.gm-slider::before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 2px rgba(0,0,0,.25);}
+			.gm-switch input:checked+.gm-slider{background:#2271b1;}
+			.gm-switch input:checked+.gm-slider::before{transform:translateX(18px);}
+			.gm-switch input:focus-visible+.gm-slider{outline:2px solid #2271b1;outline-offset:2px;}
+			.gm-guide-body{display:none;border-top:1px solid #f0f0f1;}
+			.gm-guide.open .gm-guide-body{display:block;}
+			.gm-gstep{display:grid;grid-template-columns:34px 1fr auto;gap:0 14px;padding:16px;border-bottom:1px solid #f0f0f1;}
+			.gm-gstep:last-child{border-bottom:0;}
+			.gm-gstep-n{width:26px;height:26px;border-radius:50%;background:#f0f0f1;color:#50575e;font-weight:600;font-size:12px;display:grid;place-items:center;}
+			.gm-gstep h3{margin:2px 0 6px;font-size:14px;}
+			.gm-gstep p{margin:0 0 6px;color:#50575e;font-size:13px;max-width:70ch;}
+			.gm-gstep .gm-copy{font-family:Menlo,Consolas,monospace;font-size:12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:3px;padding:1px 6px;}
+			.gm-gstep-link{align-self:start;white-space:nowrap;}
 			.gm-log{width:100%;border-collapse:collapse;font-size:12px;}
 			.gm-log td{padding:6px 8px 6px 0;border-bottom:1px solid #f0f0f1;vertical-align:top;}
 			.gm-log tr:last-child td{border-bottom:0;}
@@ -373,6 +392,67 @@ final class Graph_Mailer {
 					<?php echo 'ok' === $_GET['gm_test'] ? esc_html__( 'Test message accepted. Check the inbox — and the send log below.', 'graph-mailer' ) : esc_html__( 'Test send failed. The send log below has the error.', 'graph-mailer' ); ?>
 				</p></div>
 			<?php endif; ?>
+
+			<div class="gm-card gm-guide" id="gm-guide">
+				<div class="gm-guide-head">
+					<h2><?php esc_html_e( 'Step-by-step guide', 'graph-mailer' ); ?></h2>
+					<label class="gm-switch" title="<?php esc_attr_e( 'Show the walkthrough', 'graph-mailer' ); ?>">
+						<input type="checkbox" id="gm-guide-toggle" onchange="document.getElementById('gm-guide').classList.toggle('open',this.checked);try{localStorage.setItem('gmGuide',this.checked?'1':'')}catch(e){}">
+						<span class="gm-slider"></span>
+					</label>
+				</div>
+				<div class="gm-guide-body">
+					<div class="gm-gstep">
+						<span class="gm-gstep-n">1</span>
+						<div>
+							<h3><?php esc_html_e( 'Register an application', 'graph-mailer' ); ?></h3>
+							<p><?php esc_html_e( 'Sign in to the Microsoft Entra admin center with an admin account, open App registrations, and click "New registration". Give it a name like "WordPress Mailer", leave "Single tenant" selected, leave the redirect URI empty, and click Register.', 'graph-mailer' ); ?></p>
+						</div>
+						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"><?php esc_html_e( 'Open App registrations ↗', 'graph-mailer' ); ?></a>
+					</div>
+					<div class="gm-gstep">
+						<span class="gm-gstep-n">2</span>
+						<div>
+							<h3><?php esc_html_e( 'Copy the two IDs', 'graph-mailer' ); ?></h3>
+							<p><?php echo wp_kses( __( 'On the app\'s Overview page, copy <span class="gm-copy">Directory (tenant) ID</span> and <span class="gm-copy">Application (client) ID</span> into the fields below.', 'graph-mailer' ), array( 'span' => array( 'class' => array() ) ) ); ?></p>
+						</div>
+						<span></span>
+					</div>
+					<div class="gm-gstep">
+						<span class="gm-gstep-n">3</span>
+						<div>
+							<h3><?php esc_html_e( 'Create a client secret', 'graph-mailer' ); ?></h3>
+							<p><?php esc_html_e( 'In the app, open Certificates & secrets, click "New client secret", pick an expiry, and copy the Value column immediately — it is shown once. Put a reminder in your calendar for the expiry date; mail stops when it lapses.', 'graph-mailer' ); ?></p>
+						</div>
+						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials"><?php esc_html_e( 'Microsoft docs ↗', 'graph-mailer' ); ?></a>
+					</div>
+					<div class="gm-gstep">
+						<span class="gm-gstep-n">4</span>
+						<div>
+							<h3><?php esc_html_e( 'Grant Mail.Send and consent', 'graph-mailer' ); ?></h3>
+							<p><?php echo wp_kses( __( 'In the app, open API permissions → "Add a permission" → Microsoft Graph → <strong>Application permissions</strong> (not Delegated) → tick <span class="gm-copy">Mail.Send</span> → "Add permissions". Then click <strong>"Grant admin consent"</strong> and confirm. Skipping consent is the most common failure: the token is issued but every send is refused.', 'graph-mailer' ), array( 'strong' => array(), 'span' => array( 'class' => array() ) ) ); ?></p>
+						</div>
+						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/graph/permissions-reference"><?php esc_html_e( 'Permission reference ↗', 'graph-mailer' ); ?></a>
+					</div>
+					<div class="gm-gstep">
+						<span class="gm-gstep-n">5</span>
+						<div>
+							<h3><?php esc_html_e( 'Enter the values and test', 'graph-mailer' ); ?></h3>
+							<p><?php esc_html_e( 'Fill the four fields below, save, then use the Test card to send yourself a message. The send log records the exact Graph error if anything is off.', 'graph-mailer' ); ?></p>
+						</div>
+						<span></span>
+					</div>
+					<div class="gm-gstep">
+						<span class="gm-gstep-n">+</span>
+						<div>
+							<h3><?php esc_html_e( 'Optional: limit the blast radius', 'graph-mailer' ); ?></h3>
+							<p><?php esc_html_e( 'Application Mail.Send can send as any mailbox in the tenant. An Exchange application access policy restricts the app to only the sender mailbox — recommended for production.', 'graph-mailer' ); ?></p>
+						</div>
+						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access"><?php esc_html_e( 'Access policies ↗', 'graph-mailer' ); ?></a>
+					</div>
+				</div>
+			</div>
+			<script>try{if(localStorage.getItem('gmGuide')){document.getElementById('gm-guide').classList.add('open');document.getElementById('gm-guide-toggle').checked=true;}}catch(e){}</script>
 
 			<div class="gm-grid">
 				<div>
