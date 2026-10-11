@@ -23,7 +23,7 @@ Prepares Graph Mailer for the WordPress.org plugin directory. Mail delivery is u
 - The settings screen's styles and script moved from inline `<style>` and `<script>` blocks into `assets/admin.css` and `assets/admin.js`, loaded only on that screen.
 - The test message result is passed back to the settings screen with a nonce, rather than as a plain URL parameter.
 - The client secret is sanitized like the other settings when it's saved.
-- The plugin header now has its own Plugin URI and declares `Tested up to: 7.1`.
+- The plugin header now has its own Plugin URI. "Tested up to" is declared only in `readme.txt` (7.1), as WordPress.org requires.
 
 ## [0.2.0] - 2026-10-11
 

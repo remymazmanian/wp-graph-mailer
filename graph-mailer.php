@@ -5,7 +5,6 @@
  * Description:       Sends WordPress email through Microsoft Graph instead of SMTP. App-only OAuth against Microsoft Entra, no SMTP credentials on the server, and the default mailer as a fallback.
  * Version:           0.3.0
  * Requires at least: 6.0
- * Tested up to:      7.1
  * Requires PHP:      7.4
  * Author:            Remy Mazmanian
  * Author URI:        https://remymazmanian.com/
