@@ -8,9 +8,11 @@ If your domain's mail lives in Microsoft 365, your WordPress server does not nee
 
 - **Inert until configured.** With any credential missing, the plugin returns control to WordPress and mail flows exactly as before. Activating it changes nothing by itself.
 - **Fails safely.** With fallback on (the default), a Graph error hands the message back to the default mailer rather than dropping it. With fallback off, failures are loud: the send fails and `wp_mail_failed` fires.
-- **Tokens are cached** in a transient and refreshed two minutes before expiry. Changing settings clears the cache.
-- **Everything is logged.** The last 20 sends — successes and failures, with the Graph error message — are on the settings screen.
-- **HTML, cc/bcc, reply-to, and attachments** (to the 3 MB `sendMail` request limit) are supported.
+- **Behaves like WordPress's own mailer.** HTML switched on with the `wp_mail_content_type` filter (how WooCommerce and most form plugins do it) or a `Content-Type` header is sent as HTML. `wp_mail_succeeded` fires after a successful send, so mail logging plugins keep working.
+- **Tokens are cached** in a transient and refreshed two minutes before expiry. A cached token is only used with the credentials it was issued for, and changing settings clears the cache. If Microsoft refuses a token, the plugin waits a minute before asking again rather than holding up every email.
+- **Everything is logged.** The last 20 sends — successes and failures, with the Graph error message — are on the settings screen. A failure that was handed to the default mailer says so.
+- **HTML, cc/bcc, reply-to, and attachments** (to the 3 MB `sendMail` request limit) are supported. Every address in a header such as `Cc: a@example.com, b@example.com` is delivered, display names are kept, and an attachment keyed by name (WordPress 6.2+) is sent under that name.
+- **Mail goes out as the sender mailbox.** Graph sends as the configured mailbox, so a `From` header set by another plugin is ignored. To route replies elsewhere, such as to a contact form visitor, set `Reply-To`.
 
 ## Setup
 
@@ -46,6 +48,16 @@ New-ApplicationAccessPolicy -AppId <client-id> -PolicyScopeGroupId <mail-enabled
 ```
 
 Not required to function — required to be honest about blast radius if the secret leaks.
+
+## Development
+
+The end-to-end tests start WordPress in Docker with a stand-in for Microsoft's token and Graph endpoints, then check what each `wp_mail()` call actually sends:
+
+```bash
+tests/e2e/run.sh
+```
+
+They need Docker. `KEEP=1 tests/e2e/run.sh` leaves the site running at http://localhost:8091.
 
 ## Requirements
 

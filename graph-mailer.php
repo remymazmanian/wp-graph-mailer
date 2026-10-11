@@ -3,7 +3,7 @@
  * Plugin Name: Graph Mailer
  * Plugin URI: https://remymazmanian.com/
  * Description: Sends WordPress email through Microsoft Graph instead of SMTP. App-only OAuth against Microsoft Entra, no PHPMailer configuration, no SMTP credentials on the server. Falls back to the default mailer when unconfigured.
- * Version: 0.1.0
+ * Version: 0.2.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: Remy Mazmanian
@@ -29,12 +29,17 @@
 
 defined( 'ABSPATH' ) || exit;
 
+define( 'GRAPH_MAILER_VERSION', '0.2.0' );
+
 final class Graph_Mailer {
 
 	const OPTION    = 'graph_mailer_settings';
 	const LOG       = 'graph_mailer_log';
 	const TOKEN_KEY = 'graph_mailer_token';
 	const LOG_MAX   = 20;
+
+	/** Seconds to wait before asking Microsoft for a token again after a refusal. */
+	const TOKEN_BACKOFF = 60;
 
 	private static $instance;
 
@@ -97,6 +102,7 @@ final class Graph_Mailer {
 				$out['sender']   = sanitize_email( $in['sender'] ?? '' );
 				$out['fallback'] = empty( $in['fallback'] ) ? 0 : 1;
 				delete_transient( self::TOKEN_KEY );
+				delete_transient( self::TOKEN_KEY . '_failed' );
 				return $out;
 			},
 		) );
@@ -104,11 +110,39 @@ final class Graph_Mailer {
 
 	/* ---------------------------------------------------------- graph */
 
-	private function token() {
+	/**
+	 * Identifies the credentials a cached token belongs to, so a token for
+	 * old credentials (say, after wp-config.php changes) is never reused.
+	 */
+	private static function credentials_hash() {
+		$s = self::settings();
+		return md5( $s['tenant_id'] . '|' . $s['client_id'] . '|' . $s['client_secret'] );
+	}
+
+	/**
+	 * The cached token for the current credentials, or ''.
+	 */
+	public static function cached_token() {
 		$cached = get_transient( self::TOKEN_KEY );
-		if ( $cached ) {
+		if ( is_array( $cached ) && ! empty( $cached['token'] ) && hash_equals( (string) ( $cached['for'] ?? '' ), self::credentials_hash() ) ) {
+			return (string) $cached['token'];
+		}
+		return '';
+	}
+
+	private function token() {
+		$cached = self::cached_token();
+		if ( '' !== $cached ) {
 			return $cached;
 		}
+
+		// After a refusal, don't make every email wait on another token request
+		// that will fail the same way. Saving the settings clears this.
+		$recent = get_transient( self::TOKEN_KEY . '_failed' );
+		if ( is_array( $recent ) && hash_equals( (string) ( $recent['for'] ?? '' ), self::credentials_hash() ) ) {
+			return new WP_Error( 'graph_mailer_token', (string) $recent['error'] );
+		}
+
 		$s        = self::settings();
 		$response = wp_remote_post(
 			'https://login.microsoftonline.com/' . rawurlencode( $s['tenant_id'] ) . '/oauth2/v2.0/token',
@@ -123,16 +157,22 @@ final class Graph_Mailer {
 			)
 		);
 		if ( is_wp_error( $response ) ) {
-			return $response;
+			return $this->token_failed( 'Token request failed: ' . $response->get_error_message() );
 		}
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( empty( $body['access_token'] ) ) {
 			$detail = $body['error_description'] ?? wp_remote_retrieve_response_message( $response );
-			return new WP_Error( 'graph_mailer_token', 'Token request refused: ' . substr( (string) $detail, 0, 200 ) );
+			return $this->token_failed( 'Token request refused: ' . substr( (string) $detail, 0, 200 ) );
 		}
 		$ttl = max( 60, (int) ( $body['expires_in'] ?? 3600 ) - 120 );
-		set_transient( self::TOKEN_KEY, $body['access_token'], $ttl );
+		set_transient( self::TOKEN_KEY, array( 'token' => $body['access_token'], 'for' => self::credentials_hash() ), $ttl );
+		delete_transient( self::TOKEN_KEY . '_failed' );
 		return $body['access_token'];
+	}
+
+	private function token_failed( $message ) {
+		set_transient( self::TOKEN_KEY . '_failed', array( 'error' => $message, 'for' => self::credentials_hash() ), self::TOKEN_BACKOFF );
+		return new WP_Error( 'graph_mailer_token', $message );
 	}
 
 	/**
@@ -150,8 +190,9 @@ final class Graph_Mailer {
 			return true;
 		}
 
-		$this->log( $atts, false, $result->get_error_message() );
-		if ( self::settings()['fallback'] ) {
+		$fallback = (bool) self::settings()['fallback'];
+		$this->log( $atts, false, $result->get_error_message() . ( $fallback ? ' Handed to the default mailer.' : '' ) );
+		if ( $fallback ) {
 			return null; // hand the message to the default mailer
 		}
 		do_action( 'wp_mail_failed', new WP_Error( 'wp_mail_failed', $result->get_error_message(), $atts ) );
@@ -166,7 +207,12 @@ final class Graph_Mailer {
 		$attachments = $atts['attachments'] ?? array();
 
 		$parsed = $this->parse_headers( $headers );
-		$html   = false !== stripos( $parsed['content_type'], 'text/html' );
+
+		// Core applies this filter inside its own mailer, which a short-circuit
+		// skips, so apply it here. WooCommerce and most form plugins switch to
+		// HTML this way rather than with a header.
+		$content_type = (string) apply_filters( 'wp_mail_content_type', $parsed['content_type'] );
+		$html         = 0 === stripos( trim( $content_type ), 'text/html' );
 
 		$payload = array(
 			'message' => array(
@@ -189,9 +235,14 @@ final class Graph_Mailer {
 			$payload['message']['replyTo'] = $this->recipients( $parsed['reply_to'] );
 		}
 
+		if ( ! $payload['message']['toRecipients'] && empty( $payload['message']['ccRecipients'] ) && empty( $payload['message']['bccRecipients'] ) ) {
+			return new WP_Error( 'graph_mailer_recipients', 'No valid recipient address.' );
+		}
+
 		$total = 0;
-		foreach ( (array) $attachments as $path ) {
-			if ( ! is_readable( $path ) ) {
+		foreach ( (array) $attachments as $name => $path ) {
+			// Like core's mailer, skip a file that can't be read.
+			if ( ! is_string( $path ) || ! is_readable( $path ) ) {
 				continue;
 			}
 			$size = filesize( $path );
@@ -201,9 +252,15 @@ final class Graph_Mailer {
 			$total += $size;
 			$payload['message']['attachments'][] = array(
 				'@odata.type'  => '#microsoft.graph.fileAttachment',
-				'name'         => wp_basename( $path ),
+				// WordPress 6.2+ lets the array key name the file.
+				'name'         => is_string( $name ) && '' !== $name ? $name : wp_basename( $path ),
 				'contentBytes' => base64_encode( file_get_contents( $path ) ),
 			);
+		}
+
+		$json = wp_json_encode( $payload );
+		if ( false === $json ) {
+			return new WP_Error( 'graph_mailer_encoding', 'The message could not be encoded as UTF-8 JSON.' );
 		}
 
 		$token = $this->token();
@@ -220,7 +277,7 @@ final class Graph_Mailer {
 					'Authorization' => 'Bearer ' . $token,
 					'Content-Type'  => 'application/json',
 				),
-				'body'    => wp_json_encode( $payload ),
+				'body'    => $json,
 			)
 		);
 		if ( is_wp_error( $response ) ) {
@@ -234,21 +291,72 @@ final class Graph_Mailer {
 		}
 
 		$this->log( $atts, true, '' );
+
+		// Core fires this after its own mailer succeeds; logging plugins rely on it.
+		do_action( 'wp_mail_succeeded', $atts );
 		return true;
 	}
 
+	/**
+	 * Turns an address list into Graph recipients. Takes an array or a string,
+	 * and any item may itself hold several comma-separated addresses, such as
+	 * a single "Cc: a@example.com, b@example.com" header. Display names are
+	 * kept, and a comma inside a quoted name doesn't split the address.
+	 */
 	private function recipients( $list ) {
-		$out = array();
-		foreach ( is_array( $list ) ? $list : explode( ',', $list ) as $addr ) {
-			$addr = trim( $addr );
-			if ( preg_match( '/<([^>]+)>/', $addr, $m ) ) {
-				$addr = $m[1];
-			}
-			if ( is_email( $addr ) ) {
-				$out[] = array( 'emailAddress' => array( 'address' => $addr ) );
+		$out  = array();
+		$seen = array();
+		foreach ( (array) $list as $chunk ) {
+			foreach ( self::split_addresses( (string) $chunk ) as $item ) {
+				$name = '';
+				$addr = $item;
+				if ( preg_match( '/^(.*)<([^>]+)>$/', $item, $m ) ) {
+					$name = trim( trim( $m[1] ), '"' );
+					$addr = trim( $m[2] );
+				}
+				$key = strtolower( $addr );
+				if ( ! is_email( $addr ) || isset( $seen[ $key ] ) ) {
+					continue;
+				}
+				$seen[ $key ] = true;
+				$email        = array( 'address' => $addr );
+				if ( '' !== $name ) {
+					$email['name'] = $name;
+				}
+				$out[] = array( 'emailAddress' => $email );
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * Splits on commas that aren't inside double quotes or angle brackets.
+	 *
+	 * @return string[]
+	 */
+	public static function split_addresses( $list ) {
+		$parts  = array();
+		$buf    = '';
+		$quoted = false;
+		$angle  = false;
+		$len    = strlen( $list );
+		for ( $i = 0; $i < $len; $i++ ) {
+			$c = $list[ $i ];
+			if ( '"' === $c && ! $angle ) {
+				$quoted = ! $quoted;
+			} elseif ( '<' === $c && ! $quoted ) {
+				$angle = true;
+			} elseif ( '>' === $c && ! $quoted ) {
+				$angle = false;
+			} elseif ( ',' === $c && ! $quoted && ! $angle ) {
+				$parts[] = $buf;
+				$buf     = '';
+				continue;
+			}
+			$buf .= $c;
+		}
+		$parts[] = $buf;
+		return array_values( array_filter( array_map( 'trim', $parts ), 'strlen' ) );
 	}
 
 	private function parse_headers( $headers ) {
@@ -383,7 +491,7 @@ final class Graph_Mailer {
 		<div class="wrap gm-wrap">
 			<div class="gm-head">
 				<h1><?php esc_html_e( 'Graph Mailer', 'graph-mailer' ); ?></h1>
-				<span class="gm-ver">0.1.0</span>
+				<span class="gm-ver"><?php echo esc_html( GRAPH_MAILER_VERSION ); ?></span>
 			</div>
 			<p class="gm-sub"><?php esc_html_e( 'WordPress mail through Microsoft Graph. App-only OAuth against Microsoft Entra — no SMTP server, no mail credentials in PHPMailer. Inert until configured; with fallback on, a Graph failure hands the message to the default mailer instead of dropping it.', 'graph-mailer' ); ?></p>
 
@@ -543,7 +651,7 @@ final class Graph_Mailer {
 								<li><span><?php esc_html_e( 'Configured', 'graph-mailer' ); ?></span>
 									<?php echo $configured ? '<span class="gm-ok">' . esc_html__( 'yes', 'graph-mailer' ) . '</span>' : '<span class="gm-warn">' . esc_html__( 'no — mail unaffected', 'graph-mailer' ) . '</span>'; ?></li>
 								<li><span><?php esc_html_e( 'Token cached', 'graph-mailer' ); ?></span>
-									<?php echo get_transient( self::TOKEN_KEY ) ? '<span class="gm-ok">' . esc_html__( 'yes', 'graph-mailer' ) . '</span>' : '<span class="gm-warn">' . esc_html__( 'no', 'graph-mailer' ) . '</span>'; ?></li>
+									<?php echo '' !== self::cached_token() ? '<span class="gm-ok">' . esc_html__( 'yes', 'graph-mailer' ) . '</span>' : '<span class="gm-warn">' . esc_html__( 'no', 'graph-mailer' ) . '</span>'; ?></li>
 								<li><span><?php esc_html_e( 'Last send', 'graph-mailer' ); ?></span>
 									<?php echo $log ? ( $log[0]['ok'] ? '<span class="gm-ok">' . esc_html__( 'sent', 'graph-mailer' ) . '</span>' : '<span class="gm-bad">' . esc_html__( 'failed', 'graph-mailer' ) . '</span>' ) : '<span class="gm-warn">—</span>'; ?></li>
 							</ul>
