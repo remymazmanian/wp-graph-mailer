@@ -1,0 +1,56 @@
+/* Graph Mailer settings screen. Loaded only on Settings > Graph Mailer. */
+.gm-wrap{max-width:960px;}
+.gm-head{display:flex;align-items:baseline;gap:.6rem;margin:0 0 4px;}
+.gm-head h1{padding:0;margin:0;}
+.gm-ver{font-family:Menlo,Consolas,monospace;font-size:11px;color:#646970;border:1px solid #c3c4c7;border-radius:3px;padding:1px 6px;background:#fff;}
+.gm-sub{color:#646970;margin:0 0 20px;max-width:70ch;}
+.gm-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:20px;align-items:start;}
+@media(max-width:960px){.gm-grid{grid-template-columns:1fr;}}
+.gm-card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;box-shadow:0 1px 1px rgba(0,0,0,.04);}
+.gm-card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#1d2327;margin:0;padding:12px 16px;border-bottom:1px solid #f0f0f1;}
+.gm-card .inside{padding:16px;}
+.gm-field{padding:12px 0;border-bottom:1px solid #f0f0f1;}
+.gm-field:first-child{padding-top:2px;}
+.gm-field:last-child{border-bottom:0;padding-bottom:2px;}
+.gm-field>strong{display:block;margin-bottom:6px;}
+.gm-field input[type=text],.gm-field input[type=email],.gm-field input[type=password]{width:100%;max-width:420px;}
+.gm-field .description{margin:6px 0 0;}
+.gm-const{font-family:Menlo,Consolas,monospace;font-size:11px;color:#00701a;border:1px solid #b6e0be;background:#edfaef;border-radius:3px;padding:1px 6px;margin-left:6px;}
+.gm-status{list-style:none;margin:0;padding:0;}
+.gm-status li{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #f0f0f1;font-size:13px;}
+.gm-status li:last-child{border-bottom:0;}
+.gm-ok{color:#00701a;font-weight:600;}
+.gm-warn{color:#996800;font-weight:600;}
+.gm-bad{color:#b32d2e;font-weight:600;}
+.gm-steps{margin:0;padding:0 0 0 2px;list-style:none;counter-reset:gm;}
+.gm-steps li{counter-increment:gm;padding:6px 0 6px 30px;position:relative;font-size:13px;border-bottom:1px solid #f0f0f1;}
+.gm-steps li:last-child{border-bottom:0;}
+.gm-steps li::before{content:counter(gm);position:absolute;left:0;top:6px;width:20px;height:20px;border-radius:50%;text-align:center;line-height:20px;font-size:11px;font-weight:600;background:#f0f0f1;color:#646970;}
+.gm-step-done{color:#646970;text-decoration:line-through;text-decoration-color:#c3c4c7;}
+.gm-step-done::before{content:"\2713" !important;background:#00701a !important;color:#fff !important;}
+.gm-guide{margin-bottom:20px;}
+.gm-guide-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;}
+.gm-guide-head h2{padding:0;border:0;}
+.gm-switch{position:relative;display:inline-block;width:40px;height:22px;flex:none;}
+.gm-switch input{opacity:0;width:0;height:0;}
+.gm-slider{position:absolute;cursor:pointer;inset:0;background:#c3c4c7;border-radius:22px;transition:.25s;}
+.gm-slider::before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 2px rgba(0,0,0,.25);}
+.gm-switch input:checked+.gm-slider{background:#2271b1;}
+.gm-switch input:checked+.gm-slider::before{transform:translateX(18px);}
+.gm-switch input:focus-visible+.gm-slider{outline:2px solid #2271b1;outline-offset:2px;}
+.gm-guide-body{display:none;border-top:1px solid #f0f0f1;}
+.gm-guide.open .gm-guide-body{display:block;}
+.gm-gstep{display:grid;grid-template-columns:34px 1fr auto;gap:0 14px;padding:16px;border-bottom:1px solid #f0f0f1;}
+.gm-gstep:last-child{border-bottom:0;}
+.gm-gstep-n{width:26px;height:26px;border-radius:50%;background:#f0f0f1;color:#50575e;font-weight:600;font-size:12px;display:grid;place-items:center;}
+.gm-gstep h3{margin:2px 0 6px;font-size:14px;}
+.gm-gstep p{margin:0 0 6px;color:#50575e;font-size:13px;max-width:70ch;}
+.gm-gstep .gm-copy{font-family:Menlo,Consolas,monospace;font-size:12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:3px;padding:1px 6px;}
+.gm-gstep-link{align-self:start;white-space:nowrap;}
+.gm-log{width:100%;border-collapse:collapse;font-size:12px;}
+.gm-log td{padding:6px 8px 6px 0;border-bottom:1px solid #f0f0f1;vertical-align:top;}
+.gm-log tr:last-child td{border-bottom:0;}
+.gm-form,.gm-side{margin-bottom:20px;}
+.gm-inline{display:inline;}
+.gm-muted{color:#646970;}
+.gm-full{width:100%;}

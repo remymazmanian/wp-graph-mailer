@@ -1,5 +1,9 @@
-# Keep tests and CI out of the plugin zip and GitHub's source downloads.
+# Keep development files out of GitHub's source downloads. The plugin package
+# itself is built from .distignore (see bin/build-zip.sh).
 /.github export-ignore
+/.wordpress-org export-ignore
+/bin export-ignore
 /tests export-ignore
+/.distignore export-ignore
 /.gitattributes export-ignore
 /.gitignore export-ignore

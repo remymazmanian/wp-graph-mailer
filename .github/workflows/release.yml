@@ -1,0 +1,67 @@
+name: Release
+
+# Publishing a GitHub release builds the plugin package once and ships that same
+# build to both places: the zip is attached to the release, and the unzipped
+# folder is deployed to WordPress.org (after SVN_USERNAME and SVN_PASSWORD exist).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and deploy, for example v0.3.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+      SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the tag, plugin header and readme agree
+        run: |
+          VERSION="${TAG#v}"
+          HEADER=$(sed -n 's/^ \* Version: *//p' graph-mailer.php | head -1 | tr -d '[:space:]')
+          CONSTANT=$(sed -n "s/^define( 'GRAPH_MAILER_VERSION', '\(.*\)' );/\1/p" graph-mailer.php)
+          STABLE=$(sed -n 's/^Stable tag: *//p' readme.txt | head -1 | tr -d '[:space:]')
+          echo "tag=$VERSION header=$HEADER constant=$CONSTANT stable=$STABLE"
+          if [ "$VERSION" != "$HEADER" ] || [ "$VERSION" != "$CONSTANT" ] || [ "$VERSION" != "$STABLE" ]; then
+            echo "::error::The tag, the plugin header Version, GRAPH_MAILER_VERSION and the readme Stable tag must all match."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build the package
+        run: bin/build-zip.sh build
+
+      - name: Attach the zip to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "build/graph-mailer-$VERSION.zip" --clobber
+
+      - name: Skip WordPress.org until the SVN secrets are set
+        if: env.SVN_USERNAME == '' || env.SVN_PASSWORD == ''
+        run: echo "::notice::SVN_USERNAME and SVN_PASSWORD aren't set, so this release was not deployed to WordPress.org."
+
+      - name: Install Subversion
+        if: env.SVN_USERNAME != '' && env.SVN_PASSWORD != ''
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq subversion
+
+      - name: Deploy to WordPress.org
+        if: env.SVN_USERNAME != '' && env.SVN_PASSWORD != ''
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        env:
+          SLUG: graph-mailer
+          VERSION: ${{ env.VERSION }}
+          BUILD_DIR: build/graph-mailer
+          ASSETS_DIR: .wordpress-org

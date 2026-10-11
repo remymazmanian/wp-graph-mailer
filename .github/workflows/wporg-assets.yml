@@ -1,0 +1,55 @@
+name: WordPress.org readme and assets
+
+# Pushes readme.txt and the .wordpress-org/ banners, icons and screenshots to
+# WordPress.org without a new release, for example to update "Tested up to".
+# Runs only while the readme's Stable tag is the latest published release, so a
+# readme prepared for an upcoming version never reaches WordPress.org early.
+on:
+  push:
+    branches: [main]
+    paths:
+      - readme.txt
+      - .wordpress-org/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assets:
+    name: Update readme and assets
+    runs-on: ubuntu-latest
+    env:
+      SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+      SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether to update WordPress.org
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$SVN_USERNAME" ] || [ -z "$SVN_PASSWORD" ]; then
+            echo "::notice::SVN_USERNAME and SVN_PASSWORD aren't set, so nothing was sent to WordPress.org."
+            echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          STABLE=$(sed -n 's/^Stable tag: *//p' readme.txt | head -1 | tr -d '[:space:]')
+          LATEST=$(gh release view --json tagName -q .tagName 2>/dev/null | sed 's/^v//')
+          if [ "$STABLE" != "$LATEST" ]; then
+            echo "::notice::readme.txt says Stable tag $STABLE but the latest release is ${LATEST:-none}; the Release workflow will publish it."
+            echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "go=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install Subversion
+        if: steps.gate.outputs.go == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq subversion
+
+      - name: Update readme.txt and assets on WordPress.org
+        if: steps.gate.outputs.go == 'true'
+        uses: 10up/action-wordpress-plugin-asset-update@stable
+        env:
+          SLUG: graph-mailer
+          ASSETS_DIR: .wordpress-org
+          IGNORE_OTHER_FILES: true

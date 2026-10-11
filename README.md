@@ -51,6 +51,16 @@ Not required to function — required to be honest about blast radius if the sec
 
 ## Development
 
+`readme.txt` is the WordPress.org readme, and `.wordpress-org/` holds the directory banners, icons and screenshots.
+
+Build the plugin package exactly as a release does (the repository minus everything in `.distignore`, in a `graph-mailer/` folder):
+
+```bash
+bin/build-zip.sh
+```
+
+CI runs the official [Plugin Check](https://wordpress.org/plugins/plugin-check/) on that package for every push and pull request. Publishing a GitHub release attaches the zip to the release and, once the `SVN_USERNAME` and `SVN_PASSWORD` secrets are set, deploys the same files to WordPress.org.
+
 The end-to-end tests start WordPress in Docker with a stand-in for Microsoft's token and Graph endpoints, then check what each `wp_mail()` call actually sends:
 
 ```bash

@@ -1,16 +1,17 @@
 <?php
 /**
- * Plugin Name: Graph Mailer
- * Plugin URI: https://remymazmanian.com/
- * Description: Sends WordPress email through Microsoft Graph instead of SMTP. App-only OAuth against Microsoft Entra, no PHPMailer configuration, no SMTP credentials on the server. Falls back to the default mailer when unconfigured.
- * Version: 0.2.0
+ * Plugin Name:       Graph Mailer
+ * Plugin URI:        https://remymazmanian.com/graph-mailer/
+ * Description:       Sends WordPress email through Microsoft Graph instead of SMTP. App-only OAuth against Microsoft Entra, no SMTP credentials on the server, and the default mailer as a fallback.
+ * Version:           0.3.0
  * Requires at least: 6.0
- * Requires PHP: 7.4
- * Author: Remy Mazmanian
- * Author URI: https://remymazmanian.com/
- * License: GPL-2.0-or-later
- * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain: graph-mailer
+ * Tested up to:      7.1
+ * Requires PHP:      7.4
+ * Author:            Remy Mazmanian
+ * Author URI:        https://remymazmanian.com/
+ * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain:       graph-mailer
  */
 
 /**
@@ -29,7 +30,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'GRAPH_MAILER_VERSION', '0.2.0' );
+define( 'GRAPH_MAILER_VERSION', '0.3.0' );
 
 final class Graph_Mailer {
 
@@ -52,6 +53,8 @@ final class Graph_Mailer {
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_menu', array( $this, 'add_settings_page' ) );
 		add_action( 'admin_post_graph_mailer_test', array( $this, 'handle_test_send' ) );
+		add_action( 'admin_init', array( $this, 'privacy_policy' ) );
+		add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $this, 'action_links' ) );
 	}
 
 	/* ---------------------------------------------------------- settings */
@@ -92,12 +95,13 @@ final class Graph_Mailer {
 		register_setting( 'graph_mailer', self::OPTION, array(
 			'type'              => 'array',
 			'sanitize_callback' => function ( $in ) {
+				$in  = is_array( $in ) ? $in : array();
 				$old = (array) get_option( self::OPTION, array() );
 				$out = array();
 				$out['tenant_id'] = sanitize_text_field( $in['tenant_id'] ?? '' );
 				$out['client_id'] = sanitize_text_field( $in['client_id'] ?? '' );
 				// Write-only: an empty submit keeps the stored secret.
-				$posted               = trim( (string) ( $in['client_secret'] ?? '' ) );
+				$posted               = sanitize_text_field( (string) ( $in['client_secret'] ?? '' ) );
 				$out['client_secret'] = '' !== $posted ? $posted : ( $old['client_secret'] ?? '' );
 				$out['sender']   = sanitize_email( $in['sender'] ?? '' );
 				$out['fallback'] = empty( $in['fallback'] ) ? 0 : 1;
@@ -157,12 +161,14 @@ final class Graph_Mailer {
 			)
 		);
 		if ( is_wp_error( $response ) ) {
-			return $this->token_failed( 'Token request failed: ' . $response->get_error_message() );
+			/* translators: %s: error from the HTTP request. */
+			return $this->token_failed( sprintf( __( 'Token request failed: %s', 'graph-mailer' ), $response->get_error_message() ) );
 		}
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( empty( $body['access_token'] ) ) {
 			$detail = $body['error_description'] ?? wp_remote_retrieve_response_message( $response );
-			return $this->token_failed( 'Token request refused: ' . substr( (string) $detail, 0, 200 ) );
+			/* translators: %s: Microsoft's reason for refusing the token. */
+			return $this->token_failed( sprintf( __( 'Token request refused: %s', 'graph-mailer' ), substr( (string) $detail, 0, 200 ) ) );
 		}
 		$ttl = max( 60, (int) ( $body['expires_in'] ?? 3600 ) - 120 );
 		set_transient( self::TOKEN_KEY, array( 'token' => $body['access_token'], 'for' => self::credentials_hash() ), $ttl );
@@ -191,11 +197,12 @@ final class Graph_Mailer {
 		}
 
 		$fallback = (bool) self::settings()['fallback'];
-		$this->log( $atts, false, $result->get_error_message() . ( $fallback ? ' Handed to the default mailer.' : '' ) );
+		$this->log( $atts, false, $result->get_error_message() . ( $fallback ? ' ' . __( 'Handed to the default mailer.', 'graph-mailer' ) : '' ) );
 		if ( $fallback ) {
 			return null; // hand the message to the default mailer
 		}
-		do_action( 'wp_mail_failed', new WP_Error( 'wp_mail_failed', $result->get_error_message(), $atts ) );
+		// Core's own hook, fired as WordPress's mailer would, so error loggers see Graph failures.
+		do_action( 'wp_mail_failed', new WP_Error( 'wp_mail_failed', $result->get_error_message(), $atts ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 		return false;
 	}
 
@@ -211,7 +218,7 @@ final class Graph_Mailer {
 		// Core applies this filter inside its own mailer, which a short-circuit
 		// skips, so apply it here. WooCommerce and most form plugins switch to
 		// HTML this way rather than with a header.
-		$content_type = (string) apply_filters( 'wp_mail_content_type', $parsed['content_type'] );
+		$content_type = (string) apply_filters( 'wp_mail_content_type', $parsed['content_type'] ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core's filter, applied as wp_mail() would.
 		$html         = 0 === stripos( trim( $content_type ), 'text/html' );
 
 		$payload = array(
@@ -236,7 +243,7 @@ final class Graph_Mailer {
 		}
 
 		if ( ! $payload['message']['toRecipients'] && empty( $payload['message']['ccRecipients'] ) && empty( $payload['message']['bccRecipients'] ) ) {
-			return new WP_Error( 'graph_mailer_recipients', 'No valid recipient address.' );
+			return new WP_Error( 'graph_mailer_recipients', __( 'No valid recipient address.', 'graph-mailer' ) );
 		}
 
 		$total = 0;
@@ -247,20 +254,21 @@ final class Graph_Mailer {
 			}
 			$size = filesize( $path );
 			if ( $total + $size > 3 * MB_IN_BYTES ) {
-				return new WP_Error( 'graph_mailer_attachments', 'Attachments exceed the 3 MB sendMail limit.' );
+				return new WP_Error( 'graph_mailer_attachments', __( 'Attachments exceed the 3 MB sendMail limit.', 'graph-mailer' ) );
 			}
 			$total += $size;
 			$payload['message']['attachments'][] = array(
 				'@odata.type'  => '#microsoft.graph.fileAttachment',
 				// WordPress 6.2+ lets the array key name the file.
 				'name'         => is_string( $name ) && '' !== $name ? $name : wp_basename( $path ),
-				'contentBytes' => base64_encode( file_get_contents( $path ) ),
+				// Graph's fileAttachment carries the file as base64 (contentBytes); the file is a local path wp_mail() was given.
+				'contentBytes' => base64_encode( file_get_contents( $path ) ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 			);
 		}
 
 		$json = wp_json_encode( $payload );
 		if ( false === $json ) {
-			return new WP_Error( 'graph_mailer_encoding', 'The message could not be encoded as UTF-8 JSON.' );
+			return new WP_Error( 'graph_mailer_encoding', __( 'The message could not be encoded as UTF-8 JSON.', 'graph-mailer' ) );
 		}
 
 		$token = $this->token();
@@ -286,14 +294,15 @@ final class Graph_Mailer {
 		$code = wp_remote_retrieve_response_code( $response );
 		if ( 202 !== $code ) {
 			$body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$msg  = $body['error']['message'] ?? ( 'HTTP ' . $code );
+			/* translators: %d: HTTP status code. */
+			$msg  = $body['error']['message'] ?? sprintf( __( 'Microsoft Graph returned HTTP %d.', 'graph-mailer' ), $code );
 			return new WP_Error( 'graph_mailer_send', substr( (string) $msg, 0, 200 ) );
 		}
 
 		$this->log( $atts, true, '' );
 
 		// Core fires this after its own mailer succeeds; logging plugins rely on it.
-		do_action( 'wp_mail_succeeded', $atts );
+		do_action( 'wp_mail_succeeded', $atts ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 		return true;
 	}
 
@@ -402,92 +411,142 @@ final class Graph_Mailer {
 	/* ---------------------------------------------------------- admin */
 
 	public function add_settings_page() {
-		$hook = add_options_page( 'Graph Mailer', 'Graph Mailer', 'manage_options', 'graph-mailer', array( $this, 'render_settings_page' ) );
+		$hook = add_options_page(
+			__( 'Graph Mailer', 'graph-mailer' ),
+			__( 'Graph Mailer', 'graph-mailer' ),
+			'manage_options',
+			'graph-mailer',
+			array( $this, 'render_settings_page' )
+		);
 		add_action( 'load-' . $hook, array( $this, 'help_tab' ) );
+		add_action( 'admin_print_styles-' . $hook, array( $this, 'enqueue_assets' ) );
+	}
+
+	/** The settings screen's stylesheet and the guide's show/hide script. */
+	public function enqueue_assets() {
+		wp_enqueue_style( 'graph-mailer-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), GRAPH_MAILER_VERSION );
+		wp_enqueue_script( 'graph-mailer-admin', plugins_url( 'assets/admin.js', __FILE__ ), array(), GRAPH_MAILER_VERSION, true );
+	}
+
+	/** A "Settings" link next to Deactivate on the Plugins screen. */
+	public function action_links( $links ) {
+		array_unshift( $links, '<a href="' . esc_url( admin_url( 'options-general.php?page=graph-mailer' ) ) . '">' . esc_html__( 'Settings', 'graph-mailer' ) . '</a>' );
+		return $links;
+	}
+
+	/** Suggested text for the site's privacy policy (Settings > Privacy). */
+	public function privacy_policy() {
+		if ( ! function_exists( 'wp_add_privacy_policy_content' ) ) {
+			return;
+		}
+		$content = '<p>' . esc_html__( 'This site sends its email, such as password resets and form notifications, through Microsoft Graph, part of Microsoft 365. Each message, including its recipients, subject, body and any attachments, is sent to Microsoft to be delivered from our mailbox.', 'graph-mailer' ) . '</p>'
+			. '<p>' . esc_html__( 'A log of the last 20 messages, with each recipient address, subject and delivery result, is kept on this site so administrators can check that email is working.', 'graph-mailer' ) . '</p>'
+			. '<p>' . sprintf(
+				/* translators: %s: link to the Microsoft Privacy Statement. */
+				esc_html__( 'Microsoft\'s handling of this data is described in the %s.', 'graph-mailer' ),
+				'<a href="https://privacy.microsoft.com/privacystatement">' . esc_html__( 'Microsoft Privacy Statement', 'graph-mailer' ) . '</a>'
+			) . '</p>';
+		wp_add_privacy_policy_content( __( 'Graph Mailer', 'graph-mailer' ), wp_kses_post( $content ) );
 	}
 
 	public function help_tab() {
-		get_current_screen()->add_help_tab( array(
-			'id'      => 'gm-help',
-			'title'   => __( 'How it works', 'graph-mailer' ),
-			'content' =>
-				'<p>' . esc_html__( 'Graph Mailer short-circuits wp_mail() and delivers through Microsoft Graph with an app-only token. No SMTP server, no PHPMailer configuration, and the client secret can live in wp-config.php as a constant instead of the database.', 'graph-mailer' ) . '</p>' .
-				'<p>' . esc_html__( 'Until all four credentials are present the plugin is inert and WordPress mail flows exactly as before. With fallback enabled, a Graph failure hands the message back to the default mailer instead of dropping it.', 'graph-mailer' ) . '</p>',
-		) );
+		get_current_screen()->add_help_tab(
+			array(
+				'id'      => 'gm-help',
+				'title'   => __( 'How it works', 'graph-mailer' ),
+				'content' =>
+					'<p>' . esc_html__( 'Graph Mailer short-circuits wp_mail() and delivers through Microsoft Graph with an app-only token. No SMTP server, no PHPMailer configuration, and the client secret can live in wp-config.php as a constant instead of the database.', 'graph-mailer' ) . '</p>' .
+					'<p>' . esc_html__( 'Until all four credentials are present the plugin is inert and WordPress mail flows exactly as before. With fallback enabled, a Graph failure hands the message back to the default mailer instead of dropping it.', 'graph-mailer' ) . '</p>',
+			)
+		);
 	}
 
 	public function handle_test_send() {
-		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'graph_mailer_test' ) ) {
-			wp_die( 'Not allowed.' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You are not allowed to send a test message.', 'graph-mailer' ), '', array( 'response' => 403 ) );
 		}
-		$to = sanitize_email( wp_unslash( $_POST['test_to'] ?? '' ) );
+		check_admin_referer( 'graph_mailer_test' );
+
+		$to = isset( $_POST['test_to'] ) ? sanitize_email( wp_unslash( $_POST['test_to'] ) ) : '';
 		if ( ! $to ) {
 			$to = get_option( 'admin_email' );
 		}
-		$ok = wp_mail( $to, 'Graph Mailer test — ' . get_bloginfo( 'name' ), "This message was sent through Microsoft Graph by the Graph Mailer plugin.\n\nSite: " . home_url( '/' ) . "\nTime: " . gmdate( 'c' ) );
-		wp_safe_redirect( add_query_arg( 'gm_test', $ok ? 'ok' : 'fail', admin_url( 'options-general.php?page=graph-mailer' ) ) );
+		$ok = wp_mail(
+			$to,
+			/* translators: %s: site name. */
+			sprintf( __( 'Graph Mailer test — %s', 'graph-mailer' ), get_bloginfo( 'name' ) ),
+			/* translators: 1: site address, 2: time the message was sent. */
+			sprintf( __( "This message was sent through Microsoft Graph by the Graph Mailer plugin.\n\nSite: %1\$s\nTime: %2\$s", 'graph-mailer' ), home_url( '/' ), gmdate( 'c' ) )
+		);
+
+		// The result travels back in the URL with its own nonce, so nothing is stored.
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'gm_test'  => $ok ? 'ok' : 'fail',
+					'gm_nonce' => wp_create_nonce( 'graph_mailer_test_result' ),
+				),
+				admin_url( 'options-general.php?page=graph-mailer' )
+			)
+		);
 		exit;
 	}
 
+	/** The result of the last test send, read from the redirect: 'ok', 'fail' or ''. */
+	private function test_result() {
+		if ( ! isset( $_GET['gm_test'], $_GET['gm_nonce'] ) || ! wp_verify_nonce( sanitize_key( wp_unslash( $_GET['gm_nonce'] ) ), 'graph_mailer_test_result' ) ) {
+			return '';
+		}
+		$result = sanitize_key( wp_unslash( $_GET['gm_test'] ) );
+		return in_array( $result, array( 'ok', 'fail' ), true ) ? $result : '';
+	}
+
+	/** One credential field. Values from wp-config.php constants are never shown. */
+	private function render_field( $s, $key, $label, $type, $desc ) {
+		$is_const = ! empty( $s[ $key . '_const' ] );
+		$name     = self::OPTION . '[' . $key . ']';
+		?>
+		<div class="gm-field">
+			<strong>
+				<?php echo esc_html( $label ); ?>
+				<?php if ( $is_const ) : ?>
+					<span class="gm-const"><?php esc_html_e( 'wp-config', 'graph-mailer' ); ?></span>
+				<?php endif; ?>
+			</strong>
+			<?php if ( 'password' === $type ) : ?>
+				<input type="password" autocomplete="new-password" name="<?php echo esc_attr( $name ); ?>" value="" placeholder="<?php echo esc_attr( $s[ $key ] ? __( 'saved — leave blank to keep', 'graph-mailer' ) : '' ); ?>" <?php disabled( $is_const ); ?>>
+			<?php else : ?>
+				<input type="<?php echo esc_attr( $type ); ?>" name="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( $is_const ? '' : $s[ $key ] ); ?>" placeholder="<?php echo esc_attr( $is_const ? __( 'defined in wp-config.php', 'graph-mailer' ) : '' ); ?>" <?php disabled( $is_const ); ?>>
+			<?php endif; ?>
+			<p class="description"><?php echo esc_html( $desc ); ?></p>
+		</div>
+		<?php
+	}
+
+	/** A status value: green for good, amber for not yet, red for failed. */
+	private function badge( $state, $text ) {
+		$class = array(
+			'ok'   => 'gm-ok',
+			'warn' => 'gm-warn',
+			'bad'  => 'gm-bad',
+		);
+		return '<span class="' . esc_attr( $class[ $state ] ) . '">' . esc_html( $text ) . '</span>';
+	}
+
 	public function render_settings_page() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
 		$s          = self::settings();
 		$configured = self::configured();
 		$log        = (array) get_option( self::LOG, array() );
 		$last_ok    = $log && ! empty( $log[0]['ok'] );
+		$test       = $this->test_result();
+		$allowed    = array(
+			'strong' => array(),
+			'span'   => array( 'class' => array() ),
+		);
 		?>
-		<style>
-			.gm-wrap{max-width:960px;}
-			.gm-head{display:flex;align-items:baseline;gap:.6rem;margin:0 0 4px;}
-			.gm-head h1{padding:0;margin:0;}
-			.gm-ver{font-family:Menlo,Consolas,monospace;font-size:11px;color:#646970;border:1px solid #c3c4c7;border-radius:3px;padding:1px 6px;background:#fff;}
-			.gm-sub{color:#646970;margin:0 0 20px;max-width:70ch;}
-			.gm-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:20px;align-items:start;}
-			@media(max-width:960px){.gm-grid{grid-template-columns:1fr;}}
-			.gm-card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;box-shadow:0 1px 1px rgba(0,0,0,.04);}
-			.gm-card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#1d2327;margin:0;padding:12px 16px;border-bottom:1px solid #f0f0f1;}
-			.gm-card .inside{padding:16px;}
-			.gm-field{padding:12px 0;border-bottom:1px solid #f0f0f1;}
-			.gm-field:first-child{padding-top:2px;}
-			.gm-field:last-child{border-bottom:0;padding-bottom:2px;}
-			.gm-field>strong{display:block;margin-bottom:6px;}
-			.gm-field input[type=text],.gm-field input[type=email],.gm-field input[type=password]{width:100%;max-width:420px;}
-			.gm-field .description{margin:6px 0 0;}
-			.gm-const{font-family:Menlo,Consolas,monospace;font-size:11px;color:#00701a;border:1px solid #b6e0be;background:#edfaef;border-radius:3px;padding:1px 6px;margin-left:6px;}
-			.gm-status{list-style:none;margin:0;padding:0;}
-			.gm-status li{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #f0f0f1;font-size:13px;}
-			.gm-status li:last-child{border-bottom:0;}
-			.gm-ok{color:#00701a;font-weight:600;}
-			.gm-warn{color:#996800;font-weight:600;}
-			.gm-bad{color:#b32d2e;font-weight:600;}
-			.gm-steps{margin:0;padding:0 0 0 2px;list-style:none;counter-reset:gm;}
-			.gm-steps li{counter-increment:gm;padding:6px 0 6px 30px;position:relative;font-size:13px;border-bottom:1px solid #f0f0f1;}
-			.gm-steps li:last-child{border-bottom:0;}
-			.gm-steps li::before{content:counter(gm);position:absolute;left:0;top:6px;width:20px;height:20px;border-radius:50%;text-align:center;line-height:20px;font-size:11px;font-weight:600;background:#f0f0f1;color:#646970;}
-			.gm-step-done{color:#646970;text-decoration:line-through;text-decoration-color:#c3c4c7;}
-			.gm-step-done::before{content:"\2713" !important;background:#00701a !important;color:#fff !important;}
-			.gm-guide{margin-bottom:20px;}
-			.gm-guide-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;}
-			.gm-guide-head h2{padding:0;border:0;}
-			.gm-switch{position:relative;display:inline-block;width:40px;height:22px;flex:none;}
-			.gm-switch input{opacity:0;width:0;height:0;}
-			.gm-slider{position:absolute;cursor:pointer;inset:0;background:#c3c4c7;border-radius:22px;transition:.25s;}
-			.gm-slider::before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 2px rgba(0,0,0,.25);}
-			.gm-switch input:checked+.gm-slider{background:#2271b1;}
-			.gm-switch input:checked+.gm-slider::before{transform:translateX(18px);}
-			.gm-switch input:focus-visible+.gm-slider{outline:2px solid #2271b1;outline-offset:2px;}
-			.gm-guide-body{display:none;border-top:1px solid #f0f0f1;}
-			.gm-guide.open .gm-guide-body{display:block;}
-			.gm-gstep{display:grid;grid-template-columns:34px 1fr auto;gap:0 14px;padding:16px;border-bottom:1px solid #f0f0f1;}
-			.gm-gstep:last-child{border-bottom:0;}
-			.gm-gstep-n{width:26px;height:26px;border-radius:50%;background:#f0f0f1;color:#50575e;font-weight:600;font-size:12px;display:grid;place-items:center;}
-			.gm-gstep h3{margin:2px 0 6px;font-size:14px;}
-			.gm-gstep p{margin:0 0 6px;color:#50575e;font-size:13px;max-width:70ch;}
-			.gm-gstep .gm-copy{font-family:Menlo,Consolas,monospace;font-size:12px;background:#f6f7f7;border:1px solid #dcdcde;border-radius:3px;padding:1px 6px;}
-			.gm-gstep-link{align-self:start;white-space:nowrap;}
-			.gm-log{width:100%;border-collapse:collapse;font-size:12px;}
-			.gm-log td{padding:6px 8px 6px 0;border-bottom:1px solid #f0f0f1;vertical-align:top;}
-			.gm-log tr:last-child td{border-bottom:0;}
-		</style>
 		<div class="wrap gm-wrap">
 			<div class="gm-head">
 				<h1><?php esc_html_e( 'Graph Mailer', 'graph-mailer' ); ?></h1>
@@ -495,17 +554,17 @@ final class Graph_Mailer {
 			</div>
 			<p class="gm-sub"><?php esc_html_e( 'WordPress mail through Microsoft Graph. App-only OAuth against Microsoft Entra — no SMTP server, no mail credentials in PHPMailer. Inert until configured; with fallback on, a Graph failure hands the message to the default mailer instead of dropping it.', 'graph-mailer' ); ?></p>
 
-			<?php if ( isset( $_GET['gm_test'] ) ) : ?>
-				<div class="notice notice-<?php echo 'ok' === $_GET['gm_test'] ? 'success' : 'error'; ?> is-dismissible"><p>
-					<?php echo 'ok' === $_GET['gm_test'] ? esc_html__( 'Test message accepted. Check the inbox — and the send log below.', 'graph-mailer' ) : esc_html__( 'Test send failed. The send log below has the error.', 'graph-mailer' ); ?>
-				</p></div>
+			<?php if ( 'ok' === $test ) : ?>
+				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Test message accepted. Check the inbox — and the send log below.', 'graph-mailer' ); ?></p></div>
+			<?php elseif ( 'fail' === $test ) : ?>
+				<div class="notice notice-error is-dismissible"><p><?php esc_html_e( 'Test send failed. The send log below has the error.', 'graph-mailer' ); ?></p></div>
 			<?php endif; ?>
 
 			<div class="gm-card gm-guide" id="gm-guide">
 				<div class="gm-guide-head">
 					<h2><?php esc_html_e( 'Step-by-step guide', 'graph-mailer' ); ?></h2>
 					<label class="gm-switch" title="<?php esc_attr_e( 'Show the walkthrough', 'graph-mailer' ); ?>">
-						<input type="checkbox" id="gm-guide-toggle" onchange="document.getElementById('gm-guide').classList.toggle('open',this.checked);try{localStorage.setItem('gmGuide',this.checked?'1':'')}catch(e){}">
+						<input type="checkbox" id="gm-guide-toggle">
 						<span class="gm-slider"></span>
 					</label>
 				</div>
@@ -522,7 +581,7 @@ final class Graph_Mailer {
 						<span class="gm-gstep-n">2</span>
 						<div>
 							<h3><?php esc_html_e( 'Copy the two IDs', 'graph-mailer' ); ?></h3>
-							<p><?php echo wp_kses( __( 'On the app\'s Overview page, copy <span class="gm-copy">Directory (tenant) ID</span> and <span class="gm-copy">Application (client) ID</span> into the fields below.', 'graph-mailer' ), array( 'span' => array( 'class' => array() ) ) ); ?></p>
+							<p><?php echo wp_kses( __( 'On the app\'s Overview page, copy <span class="gm-copy">Directory (tenant) ID</span> and <span class="gm-copy">Application (client) ID</span> into the fields below.', 'graph-mailer' ), $allowed ); ?></p>
 						</div>
 						<span></span>
 					</div>
@@ -538,7 +597,7 @@ final class Graph_Mailer {
 						<span class="gm-gstep-n">4</span>
 						<div>
 							<h3><?php esc_html_e( 'Grant Mail.Send and consent', 'graph-mailer' ); ?></h3>
-							<p><?php echo wp_kses( __( 'In the app, open API permissions → "Add a permission" → Microsoft Graph → <strong>Application permissions</strong> (not Delegated) → tick <span class="gm-copy">Mail.Send</span> → "Add permissions". Then click <strong>"Grant admin consent"</strong> and confirm. Skipping consent is the most common failure: the token is issued but every send is refused.', 'graph-mailer' ), array( 'strong' => array(), 'span' => array( 'class' => array() ) ) ); ?></p>
+							<p><?php echo wp_kses( __( 'In the app, open API permissions → "Add a permission" → Microsoft Graph → <strong>Application permissions</strong> (not Delegated) → tick <span class="gm-copy">Mail.Send</span> → "Add permissions". Then click <strong>"Grant admin consent"</strong> and confirm. Skipping consent is the most common failure: the token is issued but every send is refused.', 'graph-mailer' ), $allowed ); ?></p>
 						</div>
 						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/graph/permissions-reference"><?php esc_html_e( 'Permission reference ↗', 'graph-mailer' ); ?></a>
 					</div>
@@ -560,39 +619,23 @@ final class Graph_Mailer {
 					</div>
 				</div>
 			</div>
-			<script>try{if(localStorage.getItem('gmGuide')){document.getElementById('gm-guide').classList.add('open');document.getElementById('gm-guide-toggle').checked=true;}}catch(e){}</script>
 
 			<div class="gm-grid">
 				<div>
-					<form method="post" action="options.php" class="gm-card" style="margin-bottom:20px;">
+					<form method="post" action="options.php" class="gm-card gm-form">
 						<h2><?php esc_html_e( 'Microsoft Entra credentials', 'graph-mailer' ); ?></h2>
 						<div class="inside">
-							<?php settings_fields( 'graph_mailer' ); ?>
 							<?php
-							$field = function ( $key, $label, $type, $desc ) use ( $s ) {
-								$is_const = ! empty( $s[ $key . '_const' ] );
-								echo '<div class="gm-field"><strong>' . esc_html( $label );
-								if ( $is_const ) {
-									echo '<span class="gm-const">wp-config</span>';
-								}
-								echo '</strong>';
-								if ( 'password' === $type ) {
-									$ph = $s[ $key ] ? __( 'saved — leave blank to keep', 'graph-mailer' ) : '';
-									echo '<input type="password" autocomplete="new-password" name="' . esc_attr( self::OPTION ) . '[' . esc_attr( $key ) . ']" value="" placeholder="' . esc_attr( $ph ) . '"' . disabled( $is_const, true, false ) . '>';
-								} else {
-									echo '<input type="' . esc_attr( $type ) . '" name="' . esc_attr( self::OPTION ) . '[' . esc_attr( $key ) . ']" value="' . esc_attr( $is_const ? '' : $s[ $key ] ) . '"' . disabled( $is_const, true, false ) . ( $is_const ? ' placeholder="' . esc_attr__( 'defined in wp-config.php', 'graph-mailer' ) . '"' : '' ) . '>';
-								}
-								echo '<p class="description">' . esc_html( $desc ) . '</p></div>';
-							};
-							$field( 'tenant_id', __( 'Tenant ID', 'graph-mailer' ), 'text', __( 'Directory (tenant) ID from the app registration overview.', 'graph-mailer' ) );
-							$field( 'client_id', __( 'Client ID', 'graph-mailer' ), 'text', __( 'Application (client) ID from the same screen.', 'graph-mailer' ) );
-							$field( 'client_secret', __( 'Client secret', 'graph-mailer' ), 'password', __( 'Write-only: shown never, kept unless you type a new one. Prefer the GRAPH_MAILER_CLIENT_SECRET constant in wp-config.php.', 'graph-mailer' ) );
-							$field( 'sender', __( 'Sender mailbox', 'graph-mailer' ), 'email', __( 'The mailbox mail is sent as. Must be a real licensed mailbox (or shared mailbox) in the tenant.', 'graph-mailer' ) );
+							settings_fields( 'graph_mailer' );
+							$this->render_field( $s, 'tenant_id', __( 'Tenant ID', 'graph-mailer' ), 'text', __( 'Directory (tenant) ID from the app registration overview.', 'graph-mailer' ) );
+							$this->render_field( $s, 'client_id', __( 'Client ID', 'graph-mailer' ), 'text', __( 'Application (client) ID from the same screen.', 'graph-mailer' ) );
+							$this->render_field( $s, 'client_secret', __( 'Client secret', 'graph-mailer' ), 'password', __( 'Write-only: shown never, kept unless you type a new one. Prefer the GRAPH_MAILER_CLIENT_SECRET constant in wp-config.php.', 'graph-mailer' ) );
+							$this->render_field( $s, 'sender', __( 'Sender mailbox', 'graph-mailer' ), 'email', __( 'The mailbox mail is sent as. Must be a real licensed mailbox (or shared mailbox) in the tenant.', 'graph-mailer' ) );
 							?>
 							<div class="gm-field">
 								<label>
 									<input type="checkbox" name="<?php echo esc_attr( self::OPTION ); ?>[fallback]" value="1" <?php checked( $s['fallback'] ); ?>>
-									<strong style="display:inline"><?php esc_html_e( 'Fall back to the default mailer on failure', 'graph-mailer' ); ?></strong>
+									<strong class="gm-inline"><?php esc_html_e( 'Fall back to the default mailer on failure', 'graph-mailer' ); ?></strong>
 								</label>
 								<p class="description"><?php esc_html_e( 'Off means a Graph failure fails the send outright — visible, but mail stops. On means delivery degrades to PHP mail instead.', 'graph-mailer' ); ?></p>
 							</div>
@@ -607,9 +650,15 @@ final class Graph_Mailer {
 							<table class="gm-log">
 								<?php foreach ( $log as $entry ) : ?>
 								<tr>
-									<td><?php echo esc_html( wp_date( 'M j H:i', $entry['time'] ) ); ?></td>
-									<td><?php echo esc_html( $entry['to'] ); ?><br><span style="color:#646970"><?php echo esc_html( $entry['subject'] ); ?></span></td>
-									<td><?php echo $entry['ok'] ? '<span class="gm-ok">sent</span>' : '<span class="gm-bad">failed</span><br><span style="color:#646970">' . esc_html( $entry['error'] ) . '</span>'; ?></td>
+									<td><?php echo esc_html( wp_date( 'M j H:i', (int) $entry['time'] ) ); ?></td>
+									<td><?php echo esc_html( $entry['to'] ); ?><br><span class="gm-muted"><?php echo esc_html( $entry['subject'] ); ?></span></td>
+									<td>
+										<?php if ( ! empty( $entry['ok'] ) ) : ?>
+											<span class="gm-ok"><?php esc_html_e( 'sent', 'graph-mailer' ); ?></span>
+										<?php else : ?>
+											<span class="gm-bad"><?php esc_html_e( 'failed', 'graph-mailer' ); ?></span><br><span class="gm-muted"><?php echo esc_html( $entry['error'] ); ?></span>
+										<?php endif; ?>
+									</td>
 								</tr>
 								<?php endforeach; ?>
 							</table>
@@ -621,39 +670,45 @@ final class Graph_Mailer {
 				</div>
 
 				<div>
-					<div class="gm-card" style="margin-bottom:20px;">
+					<div class="gm-card gm-side">
 						<h2><?php esc_html_e( 'Setup', 'graph-mailer' ); ?></h2>
 						<div class="inside">
 							<?php
+							// Step 3 (consent) can't be read from here; a successful send proves it.
 							$steps = array(
 								array( (bool) ( $s['tenant_id'] && $s['client_id'] ), __( 'Register an app in Microsoft Entra and copy its IDs', 'graph-mailer' ) ),
 								array( (bool) $s['client_secret'], __( 'Create a client secret', 'graph-mailer' ) ),
-								array( false, __( 'Grant Mail.Send (application) and give admin consent', 'graph-mailer' ) ),
+								array( $last_ok, __( 'Grant Mail.Send (application) and give admin consent', 'graph-mailer' ) ),
 								array( (bool) is_email( $s['sender'] ), __( 'Set the sender mailbox', 'graph-mailer' ) ),
 								array( $last_ok, __( 'Send a test message', 'graph-mailer' ) ),
 							);
-							// Step 3 cannot be read from here; infer it from a successful send.
-							$steps[2][0] = $last_ok;
-							echo '<ol class="gm-steps">';
-							foreach ( $steps as $st ) {
-								echo '<li class="' . ( $st[0] ? 'gm-step-done' : 'gm-step-open' ) . '">' . esc_html( $st[1] ) . '</li>';
-							}
-							echo '</ol>';
 							?>
+							<ol class="gm-steps">
+								<?php foreach ( $steps as $step ) : ?>
+									<li class="<?php echo esc_attr( $step[0] ? 'gm-step-done' : 'gm-step-open' ); ?>"><?php echo esc_html( $step[1] ); ?></li>
+								<?php endforeach; ?>
+							</ol>
 							<p class="description"><?php esc_html_e( 'Entra admin center → App registrations → New registration. No redirect URI is needed for app-only mail.', 'graph-mailer' ); ?></p>
 						</div>
 					</div>
 
-					<div class="gm-card" style="margin-bottom:20px;">
+					<div class="gm-card gm-side">
 						<h2><?php esc_html_e( 'Status', 'graph-mailer' ); ?></h2>
 						<div class="inside">
 							<ul class="gm-status">
 								<li><span><?php esc_html_e( 'Configured', 'graph-mailer' ); ?></span>
-									<?php echo $configured ? '<span class="gm-ok">' . esc_html__( 'yes', 'graph-mailer' ) . '</span>' : '<span class="gm-warn">' . esc_html__( 'no — mail unaffected', 'graph-mailer' ) . '</span>'; ?></li>
+									<?php echo $configured ? $this->badge( 'ok', __( 'yes', 'graph-mailer' ) ) : $this->badge( 'warn', __( 'no — mail unaffected', 'graph-mailer' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes. ?></li>
 								<li><span><?php esc_html_e( 'Token cached', 'graph-mailer' ); ?></span>
-									<?php echo '' !== self::cached_token() ? '<span class="gm-ok">' . esc_html__( 'yes', 'graph-mailer' ) . '</span>' : '<span class="gm-warn">' . esc_html__( 'no', 'graph-mailer' ) . '</span>'; ?></li>
+									<?php echo '' !== self::cached_token() ? $this->badge( 'ok', __( 'yes', 'graph-mailer' ) ) : $this->badge( 'warn', __( 'no', 'graph-mailer' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes. ?></li>
 								<li><span><?php esc_html_e( 'Last send', 'graph-mailer' ); ?></span>
-									<?php echo $log ? ( $log[0]['ok'] ? '<span class="gm-ok">' . esc_html__( 'sent', 'graph-mailer' ) . '</span>' : '<span class="gm-bad">' . esc_html__( 'failed', 'graph-mailer' ) . '</span>' ) : '<span class="gm-warn">—</span>'; ?></li>
+									<?php
+									if ( ! $log ) {
+										echo $this->badge( 'warn', '—' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes.
+									} else {
+										echo $last_ok ? $this->badge( 'ok', __( 'sent', 'graph-mailer' ) ) : $this->badge( 'bad', __( 'failed', 'graph-mailer' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes.
+									}
+									?>
+								</li>
 							</ul>
 						</div>
 					</div>
@@ -664,7 +719,7 @@ final class Graph_Mailer {
 							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 								<?php wp_nonce_field( 'graph_mailer_test' ); ?>
 								<input type="hidden" name="action" value="graph_mailer_test">
-								<p><input type="email" name="test_to" style="width:100%" placeholder="<?php echo esc_attr( get_option( 'admin_email' ) ); ?>"></p>
+								<p><input type="email" name="test_to" class="gm-full" placeholder="<?php echo esc_attr( get_option( 'admin_email' ) ); ?>"></p>
 								<?php submit_button( __( 'Send test message', 'graph-mailer' ), 'secondary', 'submit', false, $configured ? array() : array( 'disabled' => 'disabled' ) ); ?>
 								<?php if ( ! $configured ) : ?>
 								<p class="description"><?php esc_html_e( 'Enter the credentials first.', 'graph-mailer' ); ?></p>

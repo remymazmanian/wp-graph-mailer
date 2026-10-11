@@ -4,6 +4,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+Prepares Graph Mailer for the WordPress.org plugin directory. Mail delivery is unchanged, and nothing needs reconfiguring.
+
+### Added
+
+- `readme.txt` in the WordPress.org format, including an External services section on what is sent to Microsoft and when.
+- A Settings link next to Deactivate on the Plugins screen.
+- Suggested text for the site's privacy policy under Settings > Privacy, covering Microsoft Graph and the send log.
+- WordPress.org banners, icons and screenshots in `.wordpress-org/`.
+- Release automation: publishing a GitHub release builds the plugin package once, attaches the zip to the release and deploys the same files to WordPress.org. A separate workflow syncs the readme and directory assets. CI runs the official Plugin Check on every push and pull request.
+- `bin/build-zip.sh` and `.distignore`, which build the package exactly as the release workflow does.
+
+### Changed
+
+- Every message the plugin shows, including errors in the send log, can now be translated, with translator comments where a value is inserted.
+- The settings screen's styles and script moved from inline `<style>` and `<script>` blocks into `assets/admin.css` and `assets/admin.js`, loaded only on that screen.
+- The test message result is passed back to the settings screen with a nonce, rather than as a plain URL parameter.
+- The client secret is sanitized like the other settings when it's saved.
+- The plugin header now has its own Plugin URI and declares `Tested up to: 7.1`.
+
 ## [0.2.0] - 2026-10-11
 
 Fixes HTML mail, Cc and Bcc lists, and recipients whose names contain commas. Nothing needs reconfiguring after the update.
@@ -47,6 +68,7 @@ First release of Graph Mailer, a WordPress plugin that sends your site's email t
 - Write-only client secret field, plus `wp-config.php` constants (`GRAPH_MAILER_TENANT_ID`, `GRAPH_MAILER_CLIENT_ID`, `GRAPH_MAILER_CLIENT_SECRET`, `GRAPH_MAILER_SENDER`) that take priority over the stored settings.
 - Setup checklist on the settings screen that ticks itself off, and a step-by-step Microsoft Entra guide you can show or hide.
 
-[Unreleased]: https://github.com/remymazmanian/wp-graph-mailer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/remymazmanian/wp-graph-mailer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.2.0
 [0.1.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.1.0

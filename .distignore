@@ -1,0 +1,26 @@
+# Files kept out of the plugin package. The release workflow and bin/build-zip.sh
+# both copy the repository with rsync --exclude-from=.distignore, so the zip on
+# GitHub and the copy on WordPress.org are built from the same file list.
+/.git
+/.github
+/.wordpress-org
+/.distignore
+/.gitattributes
+/.gitignore
+/.editorconfig
+/.DS_Store
+/bin
+/build
+/tests
+/node_modules
+/vendor
+/composer.json
+/composer.lock
+/package.json
+/package-lock.json
+/phpcs.xml
+/phpcs.xml.dist
+/phpunit.xml
+/phpunit.xml.dist
+/README.md
+/SECURITY.md

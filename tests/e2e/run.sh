@@ -31,9 +31,16 @@ check() { if eval "$2"; then echo "PASS  $1"; pass=$((pass+1)); else echo "FAIL 
 read -r HASH AUTH LOGGED < <(wp eval 'echo md5( get_option( "siteurl" ) ), " ", wp_generate_auth_cookie( 1, time() + 600, "auth" ), " ", wp_generate_auth_cookie( 1, time() + 600, "logged_in" ), "\n";')
 COOKIE="wordpress_$HASH=$AUTH; wordpress_logged_in_$HASH=$LOGGED"
 PAGE=$(curl -s -b "$COOKIE" "$BASE/wp-admin/options-general.php?page=graph-mailer")
-check "the settings screen shows version 0.2.0" '[[ "$PAGE" == *">0.2.0</span>"* ]]'
+VERSION=$(sed -n 's/^ \* Version: *//p' "$PLUGIN_DIR/graph-mailer.php" | head -1 | tr -d '[:space:]')
+check "the settings screen shows version $VERSION" '[[ "$PAGE" == *">$VERSION</span>"* ]]'
+check "the settings screen loads its stylesheet and script" '[[ "$PAGE" == *"graph-mailer/assets/admin.css"* && "$PAGE" == *"graph-mailer/assets/admin.js"* ]]'
+check "the plugin prints no inline styles or event handlers" '! grep -q -E "onchange=|\.gm-wrap\{" <<<"$PAGE"'
 check "the stored client secret never appears in the page" '[[ "$PAGE" != *"test-secret"* ]]'
 check "the screen reports the configuration as complete" '[[ "$PAGE" == *"Configured"* && "$PAGE" == *"gm-ok"* ]]'
+FORGED=$(curl -s -b "$COOKIE" "$BASE/wp-admin/options-general.php?page=graph-mailer&gm_test=ok&gm_nonce=forged")
+check "a test result in the URL without a valid nonce shows no notice" '[[ "$FORGED" != *"Test message accepted"* ]]'
+PLUGINS=$(curl -s -b "$COOKIE" "$BASE/wp-admin/plugins.php")
+check "the Plugins screen links to the settings" '[[ "$PLUGINS" == *"options-general.php?page=graph-mailer"* ]]'
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$COOKIE" -d 'action=graph_mailer_test' "$BASE/wp-admin/admin-post.php")
 check "a test send without its nonce is refused" '[ "$CODE" = 403 ]'
 LOGS=$(compose logs wordpress 2>&1 | grep -iE 'PHP (Warning|Notice|Fatal|Deprecated).*graph-mailer' || true)
