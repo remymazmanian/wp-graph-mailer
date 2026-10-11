@@ -1,5 +1,5 @@
 === Graph Mailer ===
-Contributors: your-wporg-username
+Contributors: remymazmanian
 Tags: email, smtp, microsoft 365, graph, outlook
 Requires at least: 6.0
 Tested up to: 7.1
