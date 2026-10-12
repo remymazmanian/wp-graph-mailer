@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately through GitHub: open the [Security tab](https://github.com/remymazmanian/wp-graph-mailer/security) and choose **Report a vulnerability**. Don't open a public issue for a vulnerability.
+Please report security problems privately through GitHub: open the [Security tab](https://github.com/remymazmanian/wp-sendelva/security) and choose **Report a vulnerability**. Don't open a public issue for a vulnerability.
 
 Include the plugin, WordPress and PHP versions, what you found and, if you can, steps that reproduce it. You'll get a reply within a few days, and fixes are released as soon as they're ready.
 

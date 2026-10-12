@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Sendelva – Email Delivery for Microsoft 365
- * Plugin URI:        https://remymazmanian.com/graph-mailer/
+ * Plugin URI:        https://remymazmanian.com/sendelva/
  * Description:       Sends WordPress email through Microsoft Graph instead of SMTP. App-only OAuth against Microsoft Entra, no SMTP credentials on the server, and the default mailer as a fallback.
  * Version:           0.4.0
  * Requires at least: 6.0

@@ -23,7 +23,7 @@ Graph Mailer is now **Sendelva – Email Delivery for Microsoft 365**, a new nam
 
 ## [0.3.0] - 2026-10-11
 
-Prepares Graph Mailer for the WordPress.org plugin directory. Mail delivery is unchanged, and nothing needs reconfiguring.
+Prepares Graph Mailer for the WordPress.org plugin directory. This version was tagged and submitted to WordPress.org but not published as a GitHub release; 0.4.0 replaced it. Mail delivery is unchanged, and nothing needs reconfiguring.
 
 ### Added
 
@@ -85,8 +85,8 @@ First release of Graph Mailer, a WordPress plugin that sends your site's email t
 - Write-only client secret field, plus `wp-config.php` constants (`GRAPH_MAILER_TENANT_ID`, `GRAPH_MAILER_CLIENT_ID`, `GRAPH_MAILER_CLIENT_SECRET`, `GRAPH_MAILER_SENDER`) that take priority over the stored settings.
 - Setup checklist on the settings screen that ticks itself off, and a step-by-step Microsoft Entra guide you can show or hide.
 
-[Unreleased]: https://github.com/remymazmanian/wp-graph-mailer/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/remymazmanian/wp-graph-mailer/compare/v0.2.0...v0.4.0
-[0.3.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.3.0
-[0.2.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.2.0
-[0.1.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.1.0
+[Unreleased]: https://github.com/remymazmanian/wp-sendelva/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/remymazmanian/wp-sendelva/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/remymazmanian/wp-sendelva/releases/tag/v0.3.0
+[0.2.0]: https://github.com/remymazmanian/wp-sendelva/releases/tag/v0.2.0
+[0.1.0]: https://github.com/remymazmanian/wp-sendelva/releases/tag/v0.1.0
