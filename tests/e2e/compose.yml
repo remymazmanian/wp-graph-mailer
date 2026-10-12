@@ -1,4 +1,4 @@
-name: gm-e2e
+name: sendelva-e2e
 x-wp-env: &wp-env
   WORDPRESS_DB_HOST: db
   WORDPRESS_DB_USER: wp
@@ -11,7 +11,7 @@ x-mounts: &mounts
   - wp:/var/www/html
   - type: bind
     source: ${PLUGIN_DIR:-../..}
-    target: /var/www/html/wp-content/plugins/graph-mailer
+    target: /var/www/html/wp-content/plugins/sendelva
     read_only: true
   # Stands in for Microsoft's token and Graph endpoints. Test only.
   - type: bind

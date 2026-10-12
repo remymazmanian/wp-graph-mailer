@@ -1,13 +1,13 @@
-/* Graph Mailer settings screen: the show/hide switch for the step-by-step guide.
+/* Sendelva settings screen: the show/hide switch for the step-by-step guide.
    The choice is remembered in this browser only. */
 ( function () {
-	var guide = document.getElementById( 'gm-guide' );
-	var toggle = document.getElementById( 'gm-guide-toggle' );
+	var guide = document.getElementById( 'sendelva-guide' );
+	var toggle = document.getElementById( 'sendelva-guide-toggle' );
 	if ( ! guide || ! toggle ) {
 		return;
 	}
 	try {
-		if ( window.localStorage.getItem( 'gmGuide' ) ) {
+		if ( window.localStorage.getItem( 'sendelvaGuide' ) ) {
 			guide.classList.add( 'open' );
 			toggle.checked = true;
 		}
@@ -15,7 +15,7 @@
 	toggle.addEventListener( 'change', function () {
 		guide.classList.toggle( 'open', toggle.checked );
 		try {
-			window.localStorage.setItem( 'gmGuide', toggle.checked ? '1' : '' );
+			window.localStorage.setItem( 'sendelvaGuide', toggle.checked ? '1' : '' );
 		} catch ( e ) {}
 	} );
 }() );

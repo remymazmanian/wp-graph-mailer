@@ -4,6 +4,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
+Graph Mailer is now **Sendelva – Email Delivery for Microsoft 365**, a new name for the WordPress.org directory. Mail delivery is unchanged. Existing sites keep their settings, send log and `wp-config.php` constants.
+
+### Changed
+
+- The plugin is renamed Sendelva. Its folder, main file (`sendelva.php`) and text domain are `sendelva`, and the package is `sendelva-<version>.zip` with a `sendelva/` folder inside.
+- The settings screen moved to Settings > Sendelva.
+- The `wp-config.php` constants are now `SENDELVA_TENANT_ID`, `SENDELVA_CLIENT_ID`, `SENDELVA_CLIENT_SECRET` and `SENDELVA_SENDER`. The `GRAPH_MAILER_*` names still work wherever the new one isn't defined.
+- Settings, the send log and cached tokens are stored as `sendelva_settings`, `sendelva_log` and `sendelva_token`, and the PHP class is `Sendelva`.
+- The WordPress.org banners and screenshots show the new name.
+
+### Added
+
+- The first time Sendelva runs on a site that had Graph Mailer, it copies Graph Mailer's settings and send log. Graph Mailer's own options are left for it to remove when it is deleted.
+- While Graph Mailer is still active, Sendelva shows a notice with a link to deactivate it, on the Plugins screen and its own settings screen. Until then, each email is still sent only once.
+
 ## [0.3.0] - 2026-10-11
 
 Prepares Graph Mailer for the WordPress.org plugin directory. Mail delivery is unchanged, and nothing needs reconfiguring.
@@ -68,7 +85,8 @@ First release of Graph Mailer, a WordPress plugin that sends your site's email t
 - Write-only client secret field, plus `wp-config.php` constants (`GRAPH_MAILER_TENANT_ID`, `GRAPH_MAILER_CLIENT_ID`, `GRAPH_MAILER_CLIENT_SECRET`, `GRAPH_MAILER_SENDER`) that take priority over the stored settings.
 - Setup checklist on the settings screen that ticks itself off, and a step-by-step Microsoft Entra guide you can show or hide.
 
-[Unreleased]: https://github.com/remymazmanian/wp-graph-mailer/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/remymazmanian/wp-graph-mailer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/remymazmanian/wp-graph-mailer/compare/v0.2.0...v0.4.0
 [0.3.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.2.0
 [0.1.0]: https://github.com/remymazmanian/wp-graph-mailer/releases/tag/v0.1.0

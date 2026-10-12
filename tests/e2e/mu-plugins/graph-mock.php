@@ -1,8 +1,8 @@
 <?php
 /**
  * Test double for Microsoft's token endpoint and Graph sendMail. Records every
- * request in the gm_test_requests option and answers according to
- * gm_test_mode: token=ok|refuse, send=ok|fail. Mounted by the e2e suite only.
+ * request in the e2e_requests option and answers according to
+ * e2e_mode: token=ok|refuse, send=ok|fail. Mounted by the e2e suite only.
  */
 
 add_filter(
@@ -13,8 +13,8 @@ add_filter(
 			return $pre;
 		}
 
-		$mode = wp_parse_args( (array) get_option( 'gm_test_mode', array() ), array( 'token' => 'ok', 'send' => 'ok' ) );
-		$log  = (array) get_option( 'gm_test_requests', array() );
+		$mode = wp_parse_args( (array) get_option( 'e2e_mode', array() ), array( 'token' => 'ok', 'send' => 'ok' ) );
+		$log  = (array) get_option( 'e2e_requests', array() );
 		$body = $args['body'] ?? '';
 
 		$log[] = array(
@@ -23,7 +23,7 @@ add_filter(
 			'auth' => isset( $args['headers']['Authorization'] ) ? $args['headers']['Authorization'] : '',
 			'body' => is_string( $body ) ? json_decode( $body, true ) : $body,
 		);
-		update_option( 'gm_test_requests', $log, false );
+		update_option( 'e2e_requests', $log, false );
 
 		if ( 'login.microsoftonline.com' === $host ) {
 			if ( 'refuse' === $mode['token'] ) {
@@ -42,14 +42,14 @@ add_filter(
 );
 
 // Record when a message is left for WordPress's own mailer, and stop it there
-// so nothing is really sent. Runs after Graph Mailer's own pre_wp_mail filter.
+// so nothing is really sent. Runs after Sendelva's own pre_wp_mail filter.
 add_filter(
 	'pre_wp_mail',
 	static function ( $short_circuit ) {
 		if ( null !== $short_circuit ) {
 			return $short_circuit;
 		}
-		update_option( 'gm_test_default_mailer', (int) get_option( 'gm_test_default_mailer', 0 ) + 1, false );
+		update_option( 'e2e_default_mailer', (int) get_option( 'e2e_default_mailer', 0 ) + 1, false );
 		return false;
 	},
 	99

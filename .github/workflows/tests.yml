@@ -43,9 +43,9 @@ jobs:
       - name: Run Plugin Check on the package
         uses: wordpress/plugin-check-action@v1
         with:
-          build-dir: build/graph-mailer
+          build-dir: build/sendelva
       - name: Keep the zip for download
         uses: actions/upload-artifact@v4
         with:
-          name: graph-mailer-package
-          path: build/graph-mailer-*.zip
+          name: sendelva-package
+          path: build/sendelva-*.zip

@@ -31,12 +31,12 @@ jobs:
       - name: Check the tag, plugin header and readme agree
         run: |
           VERSION="${TAG#v}"
-          HEADER=$(sed -n 's/^ \* Version: *//p' graph-mailer.php | head -1 | tr -d '[:space:]')
-          CONSTANT=$(sed -n "s/^define( 'GRAPH_MAILER_VERSION', '\(.*\)' );/\1/p" graph-mailer.php)
+          HEADER=$(sed -n 's/^ \* Version: *//p' sendelva.php | head -1 | tr -d '[:space:]')
+          CONSTANT=$(sed -n "s/^define( 'SENDELVA_VERSION', '\(.*\)' );/\1/p" sendelva.php)
           STABLE=$(sed -n 's/^Stable tag: *//p' readme.txt | head -1 | tr -d '[:space:]')
           echo "tag=$VERSION header=$HEADER constant=$CONSTANT stable=$STABLE"
           if [ "$VERSION" != "$HEADER" ] || [ "$VERSION" != "$CONSTANT" ] || [ "$VERSION" != "$STABLE" ]; then
-            echo "::error::The tag, the plugin header Version, GRAPH_MAILER_VERSION and the readme Stable tag must all match."
+            echo "::error::The tag, the plugin header Version, SENDELVA_VERSION and the readme Stable tag must all match."
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -47,7 +47,7 @@ jobs:
       - name: Attach the zip to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "build/graph-mailer-$VERSION.zip" --clobber
+        run: gh release upload "$TAG" "build/sendelva-$VERSION.zip" --clobber
 
       - name: Skip WordPress.org until the SVN secrets are set
         if: env.SVN_USERNAME == '' || env.SVN_PASSWORD == ''
@@ -61,7 +61,7 @@ jobs:
         if: env.SVN_USERNAME != '' && env.SVN_PASSWORD != ''
         uses: 10up/action-wordpress-plugin-deploy@stable
         env:
-          SLUG: graph-mailer
+          SLUG: sendelva
           VERSION: ${{ env.VERSION }}
-          BUILD_DIR: build/graph-mailer
+          BUILD_DIR: build/sendelva
           ASSETS_DIR: .wordpress-org

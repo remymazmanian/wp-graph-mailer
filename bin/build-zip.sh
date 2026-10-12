@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Builds the plugin package exactly as the release workflow does: the repository
-# copied with rsync, minus everything in .distignore, inside a graph-mailer/ folder.
-#   bin/build-zip.sh            writes build/graph-mailer/ and build/graph-mailer-<version>.zip
+# copied with rsync, minus everything in .distignore, inside a sendelva/ folder.
+#   bin/build-zip.sh            writes build/sendelva/ and build/sendelva-<version>.zip
 #   bin/build-zip.sh <outdir>   writes them to <outdir> instead
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SLUG=graph-mailer
+SLUG=sendelva
 VERSION=$(sed -n 's/^ \* Version: *//p' "$SLUG.php" | head -1 | tr -d '[:space:]')
 OUT="${1:-build}"
 mkdir -p "$OUT"

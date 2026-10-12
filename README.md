@@ -1,8 +1,8 @@
-# Graph Mailer
+# Sendelva – Email Delivery for Microsoft 365
 
-WordPress mail through Microsoft Graph. No SMTP.
+WordPress mail through Microsoft Graph. No SMTP. Formerly Graph Mailer.
 
-If your domain's mail lives in Microsoft 365, your WordPress server does not need SMTP credentials, an SMTP relay, or PHPMailer configuration. Graph Mailer short-circuits `wp_mail()` and delivers through the Microsoft Graph `sendMail` endpoint with an app-only OAuth token. Password resets, form notifications, and everything else that uses `wp_mail()` goes out through your real tenant, lands with proper SPF/DKIM alignment, and appears in the sender's Sent Items.
+If your domain's mail lives in Microsoft 365, your WordPress server does not need SMTP credentials, an SMTP relay, or PHPMailer configuration. Sendelva short-circuits `wp_mail()` and delivers through the Microsoft Graph `sendMail` endpoint with an app-only OAuth token. Password resets, form notifications, and everything else that uses `wp_mail()` goes out through your real tenant, lands with proper SPF/DKIM alignment, and appears in the sender's Sent Items.
 
 ## How it behaves
 
@@ -23,7 +23,7 @@ The settings screen carries a live checklist that ticks itself off, and this is 
 1. **Register an application** — Microsoft Entra admin center → App registrations → New registration. Single tenant, no redirect URI. Copy the **Directory (tenant) ID** and **Application (client) ID**.
 2. **Create a client secret** — Certificates & secrets → New client secret. Copy the value immediately; it is shown once.
 3. **Grant Mail.Send** — API permissions → Add a permission → Microsoft Graph → **Application permissions** → `Mail.Send`, then **Grant admin consent**. This is the step everyone forgets; without consent the token is issued but every send is refused.
-4. **Enter the four values** under Settings → Graph Mailer: tenant ID, client ID, secret, and the sender mailbox. The sender must be a real (or shared) mailbox in the tenant.
+4. **Enter the four values** under Settings → Sendelva: tenant ID, client ID, secret, and the sender mailbox. The sender must be a real (or shared) mailbox in the tenant.
 5. **Send a test message** from the same screen and check the send log.
 
 ### Keeping the secret out of the database
@@ -31,13 +31,17 @@ The settings screen carries a live checklist that ticks itself off, and this is 
 The secret field is write-only — it is never redisplayed. Better still, define the credentials in `wp-config.php` and the database copies are ignored:
 
 ```php
-define( 'GRAPH_MAILER_TENANT_ID', '…' );
-define( 'GRAPH_MAILER_CLIENT_ID', '…' );
-define( 'GRAPH_MAILER_CLIENT_SECRET', '…' );
-define( 'GRAPH_MAILER_SENDER', 'noreply@example.com' );
+define( 'SENDELVA_TENANT_ID', '…' );
+define( 'SENDELVA_CLIENT_ID', '…' );
+define( 'SENDELVA_CLIENT_SECRET', '…' );
+define( 'SENDELVA_SENDER', 'noreply@example.com' );
 ```
 
-The settings screen labels each value that comes from a constant.
+The settings screen labels each value that comes from a constant. The `GRAPH_MAILER_*` names from before the rename still work.
+
+### Coming from Graph Mailer
+
+Sendelva is Graph Mailer under a new name, in its own `sendelva` folder. Install and activate it: the first time it runs, it copies Graph Mailer's settings and send log. Then deactivate and delete Graph Mailer; while it's still active, Sendelva shows a link to deactivate it. Each email is sent only once in the meantime.
 
 ### Scoping the permission
 
@@ -53,7 +57,7 @@ Not required to function — required to be honest about blast radius if the sec
 
 `readme.txt` is the WordPress.org readme, and `.wordpress-org/` holds the directory banners, icons and screenshots.
 
-Build the plugin package exactly as a release does (the repository minus everything in `.distignore`, in a `graph-mailer/` folder):
+Build the plugin package exactly as a release does (the repository minus everything in `.distignore`, in a `sendelva/` folder):
 
 ```bash
 bin/build-zip.sh

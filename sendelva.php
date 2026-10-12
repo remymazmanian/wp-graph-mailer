@@ -1,16 +1,16 @@
 <?php
 /**
- * Plugin Name:       Graph Mailer
+ * Plugin Name:       Sendelva – Email Delivery for Microsoft 365
  * Plugin URI:        https://remymazmanian.com/graph-mailer/
  * Description:       Sends WordPress email through Microsoft Graph instead of SMTP. App-only OAuth against Microsoft Entra, no SMTP credentials on the server, and the default mailer as a fallback.
- * Version:           0.3.0
+ * Version:           0.4.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Remy Mazmanian
  * Author URI:        https://remymazmanian.com/
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain:       graph-mailer
+ * Text Domain:       sendelva
  */
 
 /**
@@ -29,17 +29,21 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'GRAPH_MAILER_VERSION', '0.3.0' );
+define( 'SENDELVA_VERSION', '0.4.0' );
 
-final class Graph_Mailer {
+final class Sendelva {
 
-	const OPTION    = 'graph_mailer_settings';
-	const LOG       = 'graph_mailer_log';
-	const TOKEN_KEY = 'graph_mailer_token';
+	const OPTION    = 'sendelva_settings';
+	const LOG       = 'sendelva_log';
+	const TOKEN_KEY = 'sendelva_token';
 	const LOG_MAX   = 20;
 
 	/** Seconds to wait before asking Microsoft for a token again after a refusal. */
 	const TOKEN_BACKOFF = 60;
+
+	/** Where Graph Mailer, this plugin's name before 0.4.0, kept its settings and send log. */
+	const LEGACY_OPTION = 'graph_mailer_settings';
+	const LEGACY_LOG    = 'graph_mailer_log';
 
 	private static $instance;
 
@@ -48,11 +52,13 @@ final class Graph_Mailer {
 	}
 
 	private function __construct() {
+		self::migrate_legacy_settings();
 		add_filter( 'pre_wp_mail', array( $this, 'intercept' ), 10, 2 );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_menu', array( $this, 'add_settings_page' ) );
-		add_action( 'admin_post_graph_mailer_test', array( $this, 'handle_test_send' ) );
+		add_action( 'admin_post_sendelva_test', array( $this, 'handle_test_send' ) );
 		add_action( 'admin_init', array( $this, 'privacy_policy' ) );
+		add_action( 'admin_notices', array( $this, 'legacy_plugin_notice' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $this, 'action_links' ) );
 	}
 
@@ -70,19 +76,44 @@ final class Graph_Mailer {
 
 	/**
 	 * Constants beat stored options, so secrets can live in wp-config.php:
-	 * GRAPH_MAILER_TENANT_ID, GRAPH_MAILER_CLIENT_ID,
-	 * GRAPH_MAILER_CLIENT_SECRET, GRAPH_MAILER_SENDER.
+	 * SENDELVA_TENANT_ID, SENDELVA_CLIENT_ID, SENDELVA_CLIENT_SECRET and
+	 * SENDELVA_SENDER. The GRAPH_MAILER_* names from before the rename still
+	 * work wherever the SENDELVA_* one isn't defined.
 	 */
 	public static function settings() {
 		$s = wp_parse_args( (array) get_option( self::OPTION, array() ), self::defaults() );
 		foreach ( array( 'tenant_id', 'client_id', 'client_secret', 'sender' ) as $key ) {
-			$const = 'GRAPH_MAILER_' . strtoupper( $key );
-			if ( defined( $const ) && constant( $const ) ) {
-				$s[ $key ]              = constant( $const );
-				$s[ $key . '_const' ] = true;
+			foreach ( array( 'SENDELVA_', 'GRAPH_MAILER_' ) as $prefix ) {
+				$const = $prefix . strtoupper( $key );
+				if ( defined( $const ) && constant( $const ) ) {
+					$s[ $key ]            = constant( $const );
+					$s[ $key . '_const' ] = true;
+					break;
+				}
 			}
 		}
 		return $s;
+	}
+
+	/**
+	 * Copies Graph Mailer's settings and send log the first time Sendelva runs
+	 * on a site that had it, so mail keeps going out without re-entering
+	 * anything. The old options stay in place; Graph Mailer's own uninstall
+	 * removes them.
+	 */
+	public static function migrate_legacy_settings() {
+		if ( false !== get_option( self::OPTION ) ) {
+			return;
+		}
+		$legacy = get_option( self::LEGACY_OPTION );
+		if ( ! is_array( $legacy ) ) {
+			return;
+		}
+		add_option( self::OPTION, $legacy );
+		$log = get_option( self::LEGACY_LOG );
+		if ( is_array( $log ) && false === get_option( self::LOG ) ) {
+			add_option( self::LOG, $log, '', false );
+		}
 	}
 
 	public static function configured() {
@@ -91,7 +122,7 @@ final class Graph_Mailer {
 	}
 
 	public function register_settings() {
-		register_setting( 'graph_mailer', self::OPTION, array(
+		register_setting( 'sendelva', self::OPTION, array(
 			'type'              => 'array',
 			'sanitize_callback' => function ( $in ) {
 				$in  = is_array( $in ) ? $in : array();
@@ -143,7 +174,7 @@ final class Graph_Mailer {
 		// that will fail the same way. Saving the settings clears this.
 		$recent = get_transient( self::TOKEN_KEY . '_failed' );
 		if ( is_array( $recent ) && hash_equals( (string) ( $recent['for'] ?? '' ), self::credentials_hash() ) ) {
-			return new WP_Error( 'graph_mailer_token', (string) $recent['error'] );
+			return new WP_Error( 'sendelva_token', (string) $recent['error'] );
 		}
 
 		$s        = self::settings();
@@ -161,13 +192,13 @@ final class Graph_Mailer {
 		);
 		if ( is_wp_error( $response ) ) {
 			/* translators: %s: error from the HTTP request. */
-			return $this->token_failed( sprintf( __( 'Token request failed: %s', 'graph-mailer' ), $response->get_error_message() ) );
+			return $this->token_failed( sprintf( __( 'Token request failed: %s', 'sendelva' ), $response->get_error_message() ) );
 		}
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( empty( $body['access_token'] ) ) {
 			$detail = $body['error_description'] ?? wp_remote_retrieve_response_message( $response );
 			/* translators: %s: Microsoft's reason for refusing the token. */
-			return $this->token_failed( sprintf( __( 'Token request refused: %s', 'graph-mailer' ), substr( (string) $detail, 0, 200 ) ) );
+			return $this->token_failed( sprintf( __( 'Token request refused: %s', 'sendelva' ), substr( (string) $detail, 0, 200 ) ) );
 		}
 		$ttl = max( 60, (int) ( $body['expires_in'] ?? 3600 ) - 120 );
 		set_transient( self::TOKEN_KEY, array( 'token' => $body['access_token'], 'for' => self::credentials_hash() ), $ttl );
@@ -177,7 +208,7 @@ final class Graph_Mailer {
 
 	private function token_failed( $message ) {
 		set_transient( self::TOKEN_KEY . '_failed', array( 'error' => $message, 'for' => self::credentials_hash() ), self::TOKEN_BACKOFF );
-		return new WP_Error( 'graph_mailer_token', $message );
+		return new WP_Error( 'sendelva_token', $message );
 	}
 
 	/**
@@ -196,7 +227,7 @@ final class Graph_Mailer {
 		}
 
 		$fallback = (bool) self::settings()['fallback'];
-		$this->log( $atts, false, $result->get_error_message() . ( $fallback ? ' ' . __( 'Handed to the default mailer.', 'graph-mailer' ) : '' ) );
+		$this->log( $atts, false, $result->get_error_message() . ( $fallback ? ' ' . __( 'Handed to the default mailer.', 'sendelva' ) : '' ) );
 		if ( $fallback ) {
 			return null; // hand the message to the default mailer
 		}
@@ -242,7 +273,7 @@ final class Graph_Mailer {
 		}
 
 		if ( ! $payload['message']['toRecipients'] && empty( $payload['message']['ccRecipients'] ) && empty( $payload['message']['bccRecipients'] ) ) {
-			return new WP_Error( 'graph_mailer_recipients', __( 'No valid recipient address.', 'graph-mailer' ) );
+			return new WP_Error( 'sendelva_recipients', __( 'No valid recipient address.', 'sendelva' ) );
 		}
 
 		$total = 0;
@@ -253,7 +284,7 @@ final class Graph_Mailer {
 			}
 			$size = filesize( $path );
 			if ( $total + $size > 3 * MB_IN_BYTES ) {
-				return new WP_Error( 'graph_mailer_attachments', __( 'Attachments exceed the 3 MB sendMail limit.', 'graph-mailer' ) );
+				return new WP_Error( 'sendelva_attachments', __( 'Attachments exceed the 3 MB sendMail limit.', 'sendelva' ) );
 			}
 			$total += $size;
 			$payload['message']['attachments'][] = array(
@@ -267,7 +298,7 @@ final class Graph_Mailer {
 
 		$json = wp_json_encode( $payload );
 		if ( false === $json ) {
-			return new WP_Error( 'graph_mailer_encoding', __( 'The message could not be encoded as UTF-8 JSON.', 'graph-mailer' ) );
+			return new WP_Error( 'sendelva_encoding', __( 'The message could not be encoded as UTF-8 JSON.', 'sendelva' ) );
 		}
 
 		$token = $this->token();
@@ -294,8 +325,8 @@ final class Graph_Mailer {
 		if ( 202 !== $code ) {
 			$body = json_decode( wp_remote_retrieve_body( $response ), true );
 			/* translators: %d: HTTP status code. */
-			$msg  = $body['error']['message'] ?? sprintf( __( 'Microsoft Graph returned HTTP %d.', 'graph-mailer' ), $code );
-			return new WP_Error( 'graph_mailer_send', substr( (string) $msg, 0, 200 ) );
+			$msg  = $body['error']['message'] ?? sprintf( __( 'Microsoft Graph returned HTTP %d.', 'sendelva' ), $code );
+			return new WP_Error( 'sendelva_send', substr( (string) $msg, 0, 200 ) );
 		}
 
 		$this->log( $atts, true, '' );
@@ -411,10 +442,10 @@ final class Graph_Mailer {
 
 	public function add_settings_page() {
 		$hook = add_options_page(
-			__( 'Graph Mailer', 'graph-mailer' ),
-			__( 'Graph Mailer', 'graph-mailer' ),
+			__( 'Sendelva', 'sendelva' ),
+			__( 'Sendelva', 'sendelva' ),
 			'manage_options',
-			'graph-mailer',
+			'sendelva',
 			array( $this, 'render_settings_page' )
 		);
 		add_action( 'load-' . $hook, array( $this, 'help_tab' ) );
@@ -423,13 +454,13 @@ final class Graph_Mailer {
 
 	/** The settings screen's stylesheet and the guide's show/hide script. */
 	public function enqueue_assets() {
-		wp_enqueue_style( 'graph-mailer-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), GRAPH_MAILER_VERSION );
-		wp_enqueue_script( 'graph-mailer-admin', plugins_url( 'assets/admin.js', __FILE__ ), array(), GRAPH_MAILER_VERSION, true );
+		wp_enqueue_style( 'sendelva-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), SENDELVA_VERSION );
+		wp_enqueue_script( 'sendelva-admin', plugins_url( 'assets/admin.js', __FILE__ ), array(), SENDELVA_VERSION, true );
 	}
 
 	/** A "Settings" link next to Deactivate on the Plugins screen. */
 	public function action_links( $links ) {
-		array_unshift( $links, '<a href="' . esc_url( admin_url( 'options-general.php?page=graph-mailer' ) ) . '">' . esc_html__( 'Settings', 'graph-mailer' ) . '</a>' );
+		array_unshift( $links, '<a href="' . esc_url( admin_url( 'options-general.php?page=sendelva' ) ) . '">' . esc_html__( 'Settings', 'sendelva' ) . '</a>' );
 		return $links;
 	}
 
@@ -438,33 +469,56 @@ final class Graph_Mailer {
 		if ( ! function_exists( 'wp_add_privacy_policy_content' ) ) {
 			return;
 		}
-		$content = '<p>' . esc_html__( 'This site sends its email, such as password resets and form notifications, through Microsoft Graph, part of Microsoft 365. Each message, including its recipients, subject, body and any attachments, is sent to Microsoft to be delivered from our mailbox.', 'graph-mailer' ) . '</p>'
-			. '<p>' . esc_html__( 'A log of the last 20 messages, with each recipient address, subject and delivery result, is kept on this site so administrators can check that email is working.', 'graph-mailer' ) . '</p>'
+		$content = '<p>' . esc_html__( 'This site sends its email, such as password resets and form notifications, through Microsoft Graph, part of Microsoft 365. Each message, including its recipients, subject, body and any attachments, is sent to Microsoft to be delivered from our mailbox.', 'sendelva' ) . '</p>'
+			. '<p>' . esc_html__( 'A log of the last 20 messages, with each recipient address, subject and delivery result, is kept on this site so administrators can check that email is working.', 'sendelva' ) . '</p>'
 			. '<p>' . sprintf(
 				/* translators: %s: link to the Microsoft Privacy Statement. */
-				esc_html__( 'Microsoft\'s handling of this data is described in the %s.', 'graph-mailer' ),
-				'<a href="https://privacy.microsoft.com/privacystatement">' . esc_html__( 'Microsoft Privacy Statement', 'graph-mailer' ) . '</a>'
+				esc_html__( 'Microsoft\'s handling of this data is described in the %s.', 'sendelva' ),
+				'<a href="https://privacy.microsoft.com/privacystatement">' . esc_html__( 'Microsoft Privacy Statement', 'sendelva' ) . '</a>'
 			) . '</p>';
-		wp_add_privacy_policy_content( __( 'Graph Mailer', 'graph-mailer' ), wp_kses_post( $content ) );
+		wp_add_privacy_policy_content( __( 'Sendelva', 'sendelva' ), wp_kses_post( $content ) );
+	}
+
+	/**
+	 * Graph Mailer is this plugin under its old name, in its own folder, so it
+	 * can still be active alongside. Mail still works (whichever runs first
+	 * sends, and the other stands aside), but offer to deactivate it.
+	 */
+	public function legacy_plugin_notice() {
+		if ( ! class_exists( 'Graph_Mailer' ) || ! current_user_can( 'activate_plugins' ) ) {
+			return;
+		}
+		$screen = get_current_screen();
+		if ( ! $screen || ! in_array( $screen->id, array( 'plugins', 'settings_page_sendelva' ), true ) ) {
+			return;
+		}
+		$file    = plugin_basename( ( new ReflectionClass( 'Graph_Mailer' ) )->getFileName() );
+		$network = is_multisite() && is_plugin_active_for_network( $file );
+		$link    = '';
+		if ( ! $network || current_user_can( 'manage_network_plugins' ) ) {
+			$url  = ( $network ? network_admin_url( 'plugins.php' ) : admin_url( 'plugins.php' ) ) . '?action=deactivate&plugin=' . rawurlencode( $file );
+			$link = ' <a href="' . esc_url( wp_nonce_url( $url, 'deactivate-plugin_' . $file ) ) . '">' . esc_html__( 'Deactivate Graph Mailer', 'sendelva' ) . '</a>';
+		}
+		echo '<div class="notice notice-warning"><p>' . esc_html__( 'Graph Mailer is still active. Sendelva is the same plugin under its new name and has already copied Graph Mailer\'s settings and send log, so Graph Mailer can be deactivated and deleted.', 'sendelva' ) . $link . '</p></div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $link is built from escaped parts above.
 	}
 
 	public function help_tab() {
 		get_current_screen()->add_help_tab(
 			array(
-				'id'      => 'gm-help',
-				'title'   => __( 'How it works', 'graph-mailer' ),
+				'id'      => 'sendelva-help',
+				'title'   => __( 'How it works', 'sendelva' ),
 				'content' =>
-					'<p>' . esc_html__( 'Graph Mailer short-circuits wp_mail() and delivers through Microsoft Graph with an app-only token. No SMTP server, no PHPMailer configuration, and the client secret can live in wp-config.php as a constant instead of the database.', 'graph-mailer' ) . '</p>' .
-					'<p>' . esc_html__( 'Until all four credentials are present the plugin is inert and WordPress mail flows exactly as before. With fallback enabled, a Graph failure hands the message back to the default mailer instead of dropping it.', 'graph-mailer' ) . '</p>',
+					'<p>' . esc_html__( 'Sendelva short-circuits wp_mail() and delivers through Microsoft Graph with an app-only token. No SMTP server, no PHPMailer configuration, and the client secret can live in wp-config.php as a constant instead of the database.', 'sendelva' ) . '</p>' .
+					'<p>' . esc_html__( 'Until all four credentials are present the plugin is inert and WordPress mail flows exactly as before. With fallback enabled, a Graph failure hands the message back to the default mailer instead of dropping it.', 'sendelva' ) . '</p>',
 			)
 		);
 	}
 
 	public function handle_test_send() {
 		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'You are not allowed to send a test message.', 'graph-mailer' ), '', array( 'response' => 403 ) );
+			wp_die( esc_html__( 'You are not allowed to send a test message.', 'sendelva' ), '', array( 'response' => 403 ) );
 		}
-		check_admin_referer( 'graph_mailer_test' );
+		check_admin_referer( 'sendelva_test' );
 
 		$to = isset( $_POST['test_to'] ) ? sanitize_email( wp_unslash( $_POST['test_to'] ) ) : '';
 		if ( ! $to ) {
@@ -473,19 +527,19 @@ final class Graph_Mailer {
 		$ok = wp_mail(
 			$to,
 			/* translators: %s: site name. */
-			sprintf( __( 'Graph Mailer test — %s', 'graph-mailer' ), get_bloginfo( 'name' ) ),
+			sprintf( __( 'Sendelva test — %s', 'sendelva' ), get_bloginfo( 'name' ) ),
 			/* translators: 1: site address, 2: time the message was sent. */
-			sprintf( __( "This message was sent through Microsoft Graph by the Graph Mailer plugin.\n\nSite: %1\$s\nTime: %2\$s", 'graph-mailer' ), home_url( '/' ), gmdate( 'c' ) )
+			sprintf( __( "This message was sent through Microsoft Graph by the Sendelva plugin.\n\nSite: %1\$s\nTime: %2\$s", 'sendelva' ), home_url( '/' ), gmdate( 'c' ) )
 		);
 
 		// The result travels back in the URL with its own nonce, so nothing is stored.
 		wp_safe_redirect(
 			add_query_arg(
 				array(
-					'gm_test'  => $ok ? 'ok' : 'fail',
-					'gm_nonce' => wp_create_nonce( 'graph_mailer_test_result' ),
+					'sendelva_test'  => $ok ? 'ok' : 'fail',
+					'sendelva_nonce' => wp_create_nonce( 'sendelva_test_result' ),
 				),
-				admin_url( 'options-general.php?page=graph-mailer' )
+				admin_url( 'options-general.php?page=sendelva' )
 			)
 		);
 		exit;
@@ -493,10 +547,10 @@ final class Graph_Mailer {
 
 	/** The result of the last test send, read from the redirect: 'ok', 'fail' or ''. */
 	private function test_result() {
-		if ( ! isset( $_GET['gm_test'], $_GET['gm_nonce'] ) || ! wp_verify_nonce( sanitize_key( wp_unslash( $_GET['gm_nonce'] ) ), 'graph_mailer_test_result' ) ) {
+		if ( ! isset( $_GET['sendelva_test'], $_GET['sendelva_nonce'] ) || ! wp_verify_nonce( sanitize_key( wp_unslash( $_GET['sendelva_nonce'] ) ), 'sendelva_test_result' ) ) {
 			return '';
 		}
-		$result = sanitize_key( wp_unslash( $_GET['gm_test'] ) );
+		$result = sanitize_key( wp_unslash( $_GET['sendelva_test'] ) );
 		return in_array( $result, array( 'ok', 'fail' ), true ) ? $result : '';
 	}
 
@@ -505,17 +559,17 @@ final class Graph_Mailer {
 		$is_const = ! empty( $s[ $key . '_const' ] );
 		$name     = self::OPTION . '[' . $key . ']';
 		?>
-		<div class="gm-field">
+		<div class="sendelva-field">
 			<strong>
 				<?php echo esc_html( $label ); ?>
 				<?php if ( $is_const ) : ?>
-					<span class="gm-const"><?php esc_html_e( 'wp-config', 'graph-mailer' ); ?></span>
+					<span class="sendelva-const"><?php esc_html_e( 'wp-config', 'sendelva' ); ?></span>
 				<?php endif; ?>
 			</strong>
 			<?php if ( 'password' === $type ) : ?>
-				<input type="password" autocomplete="new-password" name="<?php echo esc_attr( $name ); ?>" value="" placeholder="<?php echo esc_attr( $s[ $key ] ? __( 'saved — leave blank to keep', 'graph-mailer' ) : '' ); ?>" <?php disabled( $is_const ); ?>>
+				<input type="password" autocomplete="new-password" name="<?php echo esc_attr( $name ); ?>" value="" placeholder="<?php echo esc_attr( $s[ $key ] ? __( 'saved — leave blank to keep', 'sendelva' ) : '' ); ?>" <?php disabled( $is_const ); ?>>
 			<?php else : ?>
-				<input type="<?php echo esc_attr( $type ); ?>" name="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( $is_const ? '' : $s[ $key ] ); ?>" placeholder="<?php echo esc_attr( $is_const ? __( 'defined in wp-config.php', 'graph-mailer' ) : '' ); ?>" <?php disabled( $is_const ); ?>>
+				<input type="<?php echo esc_attr( $type ); ?>" name="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( $is_const ? '' : $s[ $key ] ); ?>" placeholder="<?php echo esc_attr( $is_const ? __( 'defined in wp-config.php', 'sendelva' ) : '' ); ?>" <?php disabled( $is_const ); ?>>
 			<?php endif; ?>
 			<p class="description"><?php echo esc_html( $desc ); ?></p>
 		</div>
@@ -525,9 +579,9 @@ final class Graph_Mailer {
 	/** A status value: green for good, amber for not yet, red for failed. */
 	private function badge( $state, $text ) {
 		$class = array(
-			'ok'   => 'gm-ok',
-			'warn' => 'gm-warn',
-			'bad'  => 'gm-bad',
+			'ok'   => 'sendelva-ok',
+			'warn' => 'sendelva-warn',
+			'bad'  => 'sendelva-bad',
 		);
 		return '<span class="' . esc_attr( $class[ $state ] ) . '">' . esc_html( $text ) . '</span>';
 	}
@@ -546,165 +600,165 @@ final class Graph_Mailer {
 			'span'   => array( 'class' => array() ),
 		);
 		?>
-		<div class="wrap gm-wrap">
-			<div class="gm-head">
-				<h1><?php esc_html_e( 'Graph Mailer', 'graph-mailer' ); ?></h1>
-				<span class="gm-ver"><?php echo esc_html( GRAPH_MAILER_VERSION ); ?></span>
+		<div class="wrap sendelva-wrap">
+			<div class="sendelva-head">
+				<h1><?php esc_html_e( 'Sendelva', 'sendelva' ); ?></h1>
+				<span class="sendelva-ver"><?php echo esc_html( SENDELVA_VERSION ); ?></span>
 			</div>
-			<p class="gm-sub"><?php esc_html_e( 'WordPress mail through Microsoft Graph. App-only OAuth against Microsoft Entra — no SMTP server, no mail credentials in PHPMailer. Inert until configured; with fallback on, a Graph failure hands the message to the default mailer instead of dropping it.', 'graph-mailer' ); ?></p>
+			<p class="sendelva-sub"><?php esc_html_e( 'WordPress mail through Microsoft Graph. App-only OAuth against Microsoft Entra — no SMTP server, no mail credentials in PHPMailer. Inert until configured; with fallback on, a Graph failure hands the message to the default mailer instead of dropping it.', 'sendelva' ); ?></p>
 
 			<?php if ( 'ok' === $test ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Test message accepted. Check the inbox — and the send log below.', 'graph-mailer' ); ?></p></div>
+				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Test message accepted. Check the inbox — and the send log below.', 'sendelva' ); ?></p></div>
 			<?php elseif ( 'fail' === $test ) : ?>
-				<div class="notice notice-error is-dismissible"><p><?php esc_html_e( 'Test send failed. The send log below has the error.', 'graph-mailer' ); ?></p></div>
+				<div class="notice notice-error is-dismissible"><p><?php esc_html_e( 'Test send failed. The send log below has the error.', 'sendelva' ); ?></p></div>
 			<?php endif; ?>
 
-			<div class="gm-card gm-guide" id="gm-guide">
-				<div class="gm-guide-head">
-					<h2><?php esc_html_e( 'Step-by-step guide', 'graph-mailer' ); ?></h2>
-					<label class="gm-switch" title="<?php esc_attr_e( 'Show the walkthrough', 'graph-mailer' ); ?>">
-						<input type="checkbox" id="gm-guide-toggle">
-						<span class="gm-slider"></span>
+			<div class="sendelva-card sendelva-guide" id="sendelva-guide">
+				<div class="sendelva-guide-head">
+					<h2><?php esc_html_e( 'Step-by-step guide', 'sendelva' ); ?></h2>
+					<label class="sendelva-switch" title="<?php esc_attr_e( 'Show the walkthrough', 'sendelva' ); ?>">
+						<input type="checkbox" id="sendelva-guide-toggle">
+						<span class="sendelva-slider"></span>
 					</label>
 				</div>
-				<div class="gm-guide-body">
-					<div class="gm-gstep">
-						<span class="gm-gstep-n">1</span>
+				<div class="sendelva-guide-body">
+					<div class="sendelva-gstep">
+						<span class="sendelva-gstep-n">1</span>
 						<div>
-							<h3><?php esc_html_e( 'Register an application', 'graph-mailer' ); ?></h3>
-							<p><?php esc_html_e( 'Sign in to the Microsoft Entra admin center with an admin account, open App registrations, and click "New registration". Give it a name like "WordPress Mailer", leave "Single tenant" selected, leave the redirect URI empty, and click Register.', 'graph-mailer' ); ?></p>
+							<h3><?php esc_html_e( 'Register an application', 'sendelva' ); ?></h3>
+							<p><?php esc_html_e( 'Sign in to the Microsoft Entra admin center with an admin account, open App registrations, and click "New registration". Give it a name like "WordPress Mailer", leave "Single tenant" selected, leave the redirect URI empty, and click Register.', 'sendelva' ); ?></p>
 						</div>
-						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"><?php esc_html_e( 'Open App registrations ↗', 'graph-mailer' ); ?></a>
+						<a class="button sendelva-gstep-link" target="_blank" rel="noopener" href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"><?php esc_html_e( 'Open App registrations ↗', 'sendelva' ); ?></a>
 					</div>
-					<div class="gm-gstep">
-						<span class="gm-gstep-n">2</span>
+					<div class="sendelva-gstep">
+						<span class="sendelva-gstep-n">2</span>
 						<div>
-							<h3><?php esc_html_e( 'Copy the two IDs', 'graph-mailer' ); ?></h3>
-							<p><?php echo wp_kses( __( 'On the app\'s Overview page, copy <span class="gm-copy">Directory (tenant) ID</span> and <span class="gm-copy">Application (client) ID</span> into the fields below.', 'graph-mailer' ), $allowed ); ?></p>
+							<h3><?php esc_html_e( 'Copy the two IDs', 'sendelva' ); ?></h3>
+							<p><?php echo wp_kses( __( 'On the app\'s Overview page, copy <span class="sendelva-copy">Directory (tenant) ID</span> and <span class="sendelva-copy">Application (client) ID</span> into the fields below.', 'sendelva' ), $allowed ); ?></p>
 						</div>
 						<span></span>
 					</div>
-					<div class="gm-gstep">
-						<span class="gm-gstep-n">3</span>
+					<div class="sendelva-gstep">
+						<span class="sendelva-gstep-n">3</span>
 						<div>
-							<h3><?php esc_html_e( 'Create a client secret', 'graph-mailer' ); ?></h3>
-							<p><?php esc_html_e( 'In the app, open Certificates & secrets, click "New client secret", pick an expiry, and copy the Value column immediately — it is shown once. Put a reminder in your calendar for the expiry date; mail stops when it lapses.', 'graph-mailer' ); ?></p>
+							<h3><?php esc_html_e( 'Create a client secret', 'sendelva' ); ?></h3>
+							<p><?php esc_html_e( 'In the app, open Certificates & secrets, click "New client secret", pick an expiry, and copy the Value column immediately — it is shown once. Put a reminder in your calendar for the expiry date; mail stops when it lapses.', 'sendelva' ); ?></p>
 						</div>
-						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials"><?php esc_html_e( 'Microsoft docs ↗', 'graph-mailer' ); ?></a>
+						<a class="button sendelva-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials"><?php esc_html_e( 'Microsoft docs ↗', 'sendelva' ); ?></a>
 					</div>
-					<div class="gm-gstep">
-						<span class="gm-gstep-n">4</span>
+					<div class="sendelva-gstep">
+						<span class="sendelva-gstep-n">4</span>
 						<div>
-							<h3><?php esc_html_e( 'Grant Mail.Send and consent', 'graph-mailer' ); ?></h3>
-							<p><?php echo wp_kses( __( 'In the app, open API permissions → "Add a permission" → Microsoft Graph → <strong>Application permissions</strong> (not Delegated) → tick <span class="gm-copy">Mail.Send</span> → "Add permissions". Then click <strong>"Grant admin consent"</strong> and confirm. Skipping consent is the most common failure: the token is issued but every send is refused.', 'graph-mailer' ), $allowed ); ?></p>
+							<h3><?php esc_html_e( 'Grant Mail.Send and consent', 'sendelva' ); ?></h3>
+							<p><?php echo wp_kses( __( 'In the app, open API permissions → "Add a permission" → Microsoft Graph → <strong>Application permissions</strong> (not Delegated) → tick <span class="sendelva-copy">Mail.Send</span> → "Add permissions". Then click <strong>"Grant admin consent"</strong> and confirm. Skipping consent is the most common failure: the token is issued but every send is refused.', 'sendelva' ), $allowed ); ?></p>
 						</div>
-						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/graph/permissions-reference"><?php esc_html_e( 'Permission reference ↗', 'graph-mailer' ); ?></a>
+						<a class="button sendelva-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/graph/permissions-reference"><?php esc_html_e( 'Permission reference ↗', 'sendelva' ); ?></a>
 					</div>
-					<div class="gm-gstep">
-						<span class="gm-gstep-n">5</span>
+					<div class="sendelva-gstep">
+						<span class="sendelva-gstep-n">5</span>
 						<div>
-							<h3><?php esc_html_e( 'Enter the values and test', 'graph-mailer' ); ?></h3>
-							<p><?php esc_html_e( 'Fill the four fields below, save, then use the Test card to send yourself a message. The send log records the exact Graph error if anything is off.', 'graph-mailer' ); ?></p>
+							<h3><?php esc_html_e( 'Enter the values and test', 'sendelva' ); ?></h3>
+							<p><?php esc_html_e( 'Fill the four fields below, save, then use the Test card to send yourself a message. The send log records the exact Graph error if anything is off.', 'sendelva' ); ?></p>
 						</div>
 						<span></span>
 					</div>
-					<div class="gm-gstep">
-						<span class="gm-gstep-n">+</span>
+					<div class="sendelva-gstep">
+						<span class="sendelva-gstep-n">+</span>
 						<div>
-							<h3><?php esc_html_e( 'Optional: limit the blast radius', 'graph-mailer' ); ?></h3>
-							<p><?php esc_html_e( 'Application Mail.Send can send as any mailbox in the tenant. An Exchange application access policy restricts the app to only the sender mailbox — recommended for production.', 'graph-mailer' ); ?></p>
+							<h3><?php esc_html_e( 'Optional: limit the blast radius', 'sendelva' ); ?></h3>
+							<p><?php esc_html_e( 'Application Mail.Send can send as any mailbox in the tenant. An Exchange application access policy restricts the app to only the sender mailbox — recommended for production.', 'sendelva' ); ?></p>
 						</div>
-						<a class="button gm-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access"><?php esc_html_e( 'Access policies ↗', 'graph-mailer' ); ?></a>
+						<a class="button sendelva-gstep-link" target="_blank" rel="noopener" href="https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access"><?php esc_html_e( 'Access policies ↗', 'sendelva' ); ?></a>
 					</div>
 				</div>
 			</div>
 
-			<div class="gm-grid">
+			<div class="sendelva-grid">
 				<div>
-					<form method="post" action="options.php" class="gm-card gm-form">
-						<h2><?php esc_html_e( 'Microsoft Entra credentials', 'graph-mailer' ); ?></h2>
+					<form method="post" action="options.php" class="sendelva-card sendelva-form">
+						<h2><?php esc_html_e( 'Microsoft Entra credentials', 'sendelva' ); ?></h2>
 						<div class="inside">
 							<?php
-							settings_fields( 'graph_mailer' );
-							$this->render_field( $s, 'tenant_id', __( 'Tenant ID', 'graph-mailer' ), 'text', __( 'Directory (tenant) ID from the app registration overview.', 'graph-mailer' ) );
-							$this->render_field( $s, 'client_id', __( 'Client ID', 'graph-mailer' ), 'text', __( 'Application (client) ID from the same screen.', 'graph-mailer' ) );
-							$this->render_field( $s, 'client_secret', __( 'Client secret', 'graph-mailer' ), 'password', __( 'Write-only: shown never, kept unless you type a new one. Prefer the GRAPH_MAILER_CLIENT_SECRET constant in wp-config.php.', 'graph-mailer' ) );
-							$this->render_field( $s, 'sender', __( 'Sender mailbox', 'graph-mailer' ), 'email', __( 'The mailbox mail is sent as. Must be a real licensed mailbox (or shared mailbox) in the tenant.', 'graph-mailer' ) );
+							settings_fields( 'sendelva' );
+							$this->render_field( $s, 'tenant_id', __( 'Tenant ID', 'sendelva' ), 'text', __( 'Directory (tenant) ID from the app registration overview.', 'sendelva' ) );
+							$this->render_field( $s, 'client_id', __( 'Client ID', 'sendelva' ), 'text', __( 'Application (client) ID from the same screen.', 'sendelva' ) );
+							$this->render_field( $s, 'client_secret', __( 'Client secret', 'sendelva' ), 'password', __( 'Write-only: shown never, kept unless you type a new one. Prefer the SENDELVA_CLIENT_SECRET constant in wp-config.php.', 'sendelva' ) );
+							$this->render_field( $s, 'sender', __( 'Sender mailbox', 'sendelva' ), 'email', __( 'The mailbox mail is sent as. Must be a real licensed mailbox (or shared mailbox) in the tenant.', 'sendelva' ) );
 							?>
-							<div class="gm-field">
+							<div class="sendelva-field">
 								<label>
 									<input type="checkbox" name="<?php echo esc_attr( self::OPTION ); ?>[fallback]" value="1" <?php checked( $s['fallback'] ); ?>>
-									<strong class="gm-inline"><?php esc_html_e( 'Fall back to the default mailer on failure', 'graph-mailer' ); ?></strong>
+									<strong class="sendelva-inline"><?php esc_html_e( 'Fall back to the default mailer on failure', 'sendelva' ); ?></strong>
 								</label>
-								<p class="description"><?php esc_html_e( 'Off means a Graph failure fails the send outright — visible, but mail stops. On means delivery degrades to PHP mail instead.', 'graph-mailer' ); ?></p>
+								<p class="description"><?php esc_html_e( 'Off means a Graph failure fails the send outright — visible, but mail stops. On means delivery degrades to PHP mail instead.', 'sendelva' ); ?></p>
 							</div>
 							<?php submit_button(); ?>
 						</div>
 					</form>
 
-					<div class="gm-card">
-						<h2><?php esc_html_e( 'Send log', 'graph-mailer' ); ?></h2>
+					<div class="sendelva-card">
+						<h2><?php esc_html_e( 'Send log', 'sendelva' ); ?></h2>
 						<div class="inside">
 							<?php if ( $log ) : ?>
-							<table class="gm-log">
+							<table class="sendelva-log">
 								<?php foreach ( $log as $entry ) : ?>
 								<tr>
 									<td><?php echo esc_html( wp_date( 'M j H:i', (int) $entry['time'] ) ); ?></td>
-									<td><?php echo esc_html( $entry['to'] ); ?><br><span class="gm-muted"><?php echo esc_html( $entry['subject'] ); ?></span></td>
+									<td><?php echo esc_html( $entry['to'] ); ?><br><span class="sendelva-muted"><?php echo esc_html( $entry['subject'] ); ?></span></td>
 									<td>
 										<?php if ( ! empty( $entry['ok'] ) ) : ?>
-											<span class="gm-ok"><?php esc_html_e( 'sent', 'graph-mailer' ); ?></span>
+											<span class="sendelva-ok"><?php esc_html_e( 'sent', 'sendelva' ); ?></span>
 										<?php else : ?>
-											<span class="gm-bad"><?php esc_html_e( 'failed', 'graph-mailer' ); ?></span><br><span class="gm-muted"><?php echo esc_html( $entry['error'] ); ?></span>
+											<span class="sendelva-bad"><?php esc_html_e( 'failed', 'sendelva' ); ?></span><br><span class="sendelva-muted"><?php echo esc_html( $entry['error'] ); ?></span>
 										<?php endif; ?>
 									</td>
 								</tr>
 								<?php endforeach; ?>
 							</table>
 							<?php else : ?>
-							<p class="description"><?php esc_html_e( 'No sends yet. The last 20 are kept here, successes and failures alike.', 'graph-mailer' ); ?></p>
+							<p class="description"><?php esc_html_e( 'No sends yet. The last 20 are kept here, successes and failures alike.', 'sendelva' ); ?></p>
 							<?php endif; ?>
 						</div>
 					</div>
 				</div>
 
 				<div>
-					<div class="gm-card gm-side">
-						<h2><?php esc_html_e( 'Setup', 'graph-mailer' ); ?></h2>
+					<div class="sendelva-card sendelva-side">
+						<h2><?php esc_html_e( 'Setup', 'sendelva' ); ?></h2>
 						<div class="inside">
 							<?php
 							// Step 3 (consent) can't be read from here; a successful send proves it.
 							$steps = array(
-								array( (bool) ( $s['tenant_id'] && $s['client_id'] ), __( 'Register an app in Microsoft Entra and copy its IDs', 'graph-mailer' ) ),
-								array( (bool) $s['client_secret'], __( 'Create a client secret', 'graph-mailer' ) ),
-								array( $last_ok, __( 'Grant Mail.Send (application) and give admin consent', 'graph-mailer' ) ),
-								array( (bool) is_email( $s['sender'] ), __( 'Set the sender mailbox', 'graph-mailer' ) ),
-								array( $last_ok, __( 'Send a test message', 'graph-mailer' ) ),
+								array( (bool) ( $s['tenant_id'] && $s['client_id'] ), __( 'Register an app in Microsoft Entra and copy its IDs', 'sendelva' ) ),
+								array( (bool) $s['client_secret'], __( 'Create a client secret', 'sendelva' ) ),
+								array( $last_ok, __( 'Grant Mail.Send (application) and give admin consent', 'sendelva' ) ),
+								array( (bool) is_email( $s['sender'] ), __( 'Set the sender mailbox', 'sendelva' ) ),
+								array( $last_ok, __( 'Send a test message', 'sendelva' ) ),
 							);
 							?>
-							<ol class="gm-steps">
+							<ol class="sendelva-steps">
 								<?php foreach ( $steps as $step ) : ?>
-									<li class="<?php echo esc_attr( $step[0] ? 'gm-step-done' : 'gm-step-open' ); ?>"><?php echo esc_html( $step[1] ); ?></li>
+									<li class="<?php echo esc_attr( $step[0] ? 'sendelva-step-done' : 'sendelva-step-open' ); ?>"><?php echo esc_html( $step[1] ); ?></li>
 								<?php endforeach; ?>
 							</ol>
-							<p class="description"><?php esc_html_e( 'Entra admin center → App registrations → New registration. No redirect URI is needed for app-only mail.', 'graph-mailer' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Entra admin center → App registrations → New registration. No redirect URI is needed for app-only mail.', 'sendelva' ); ?></p>
 						</div>
 					</div>
 
-					<div class="gm-card gm-side">
-						<h2><?php esc_html_e( 'Status', 'graph-mailer' ); ?></h2>
+					<div class="sendelva-card sendelva-side">
+						<h2><?php esc_html_e( 'Status', 'sendelva' ); ?></h2>
 						<div class="inside">
-							<ul class="gm-status">
-								<li><span><?php esc_html_e( 'Configured', 'graph-mailer' ); ?></span>
-									<?php echo $configured ? $this->badge( 'ok', __( 'yes', 'graph-mailer' ) ) : $this->badge( 'warn', __( 'no — mail unaffected', 'graph-mailer' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes. ?></li>
-								<li><span><?php esc_html_e( 'Token cached', 'graph-mailer' ); ?></span>
-									<?php echo '' !== self::cached_token() ? $this->badge( 'ok', __( 'yes', 'graph-mailer' ) ) : $this->badge( 'warn', __( 'no', 'graph-mailer' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes. ?></li>
-								<li><span><?php esc_html_e( 'Last send', 'graph-mailer' ); ?></span>
+							<ul class="sendelva-status">
+								<li><span><?php esc_html_e( 'Configured', 'sendelva' ); ?></span>
+									<?php echo $configured ? $this->badge( 'ok', __( 'yes', 'sendelva' ) ) : $this->badge( 'warn', __( 'no — mail unaffected', 'sendelva' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes. ?></li>
+								<li><span><?php esc_html_e( 'Token cached', 'sendelva' ); ?></span>
+									<?php echo '' !== self::cached_token() ? $this->badge( 'ok', __( 'yes', 'sendelva' ) ) : $this->badge( 'warn', __( 'no', 'sendelva' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes. ?></li>
+								<li><span><?php esc_html_e( 'Last send', 'sendelva' ); ?></span>
 									<?php
 									if ( ! $log ) {
 										echo $this->badge( 'warn', '—' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes.
 									} else {
-										echo $last_ok ? $this->badge( 'ok', __( 'sent', 'graph-mailer' ) ) : $this->badge( 'bad', __( 'failed', 'graph-mailer' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes.
+										echo $last_ok ? $this->badge( 'ok', __( 'sent', 'sendelva' ) ) : $this->badge( 'bad', __( 'failed', 'sendelva' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge() escapes.
 									}
 									?>
 								</li>
@@ -712,16 +766,16 @@ final class Graph_Mailer {
 						</div>
 					</div>
 
-					<div class="gm-card">
-						<h2><?php esc_html_e( 'Test', 'graph-mailer' ); ?></h2>
+					<div class="sendelva-card">
+						<h2><?php esc_html_e( 'Test', 'sendelva' ); ?></h2>
 						<div class="inside">
 							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-								<?php wp_nonce_field( 'graph_mailer_test' ); ?>
-								<input type="hidden" name="action" value="graph_mailer_test">
-								<p><input type="email" name="test_to" class="gm-full" placeholder="<?php echo esc_attr( get_option( 'admin_email' ) ); ?>"></p>
-								<?php submit_button( __( 'Send test message', 'graph-mailer' ), 'secondary', 'submit', false, $configured ? array() : array( 'disabled' => 'disabled' ) ); ?>
+								<?php wp_nonce_field( 'sendelva_test' ); ?>
+								<input type="hidden" name="action" value="sendelva_test">
+								<p><input type="email" name="test_to" class="sendelva-full" placeholder="<?php echo esc_attr( get_option( 'admin_email' ) ); ?>"></p>
+								<?php submit_button( __( 'Send test message', 'sendelva' ), 'secondary', 'submit', false, $configured ? array() : array( 'disabled' => 'disabled' ) ); ?>
 								<?php if ( ! $configured ) : ?>
-								<p class="description"><?php esc_html_e( 'Enter the credentials first.', 'graph-mailer' ); ?></p>
+								<p class="description"><?php esc_html_e( 'Enter the credentials first.', 'sendelva' ); ?></p>
 								<?php endif; ?>
 							</form>
 						</div>
@@ -733,4 +787,4 @@ final class Graph_Mailer {
 	}
 }
 
-Graph_Mailer::instance();
+Sendelva::instance();
