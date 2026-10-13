@@ -1,6 +1,10 @@
 # Sendelva – Email Delivery for Microsoft 365
 
+[![WordPress.org plugin version](https://img.shields.io/wordpress/plugin/v/sendelva?label=WordPress.org)](https://wordpress.org/plugins/sendelva/)
+
 WordPress mail through Microsoft Graph. No SMTP. Formerly Graph Mailer.
+
+**Install from WordPress.org:** [wordpress.org/plugins/sendelva](https://wordpress.org/plugins/sendelva/) · **Docs & setup:** [remymazmanian.com/sendelva/](https://remymazmanian.com/sendelva/)
 
 If your domain's mail lives in Microsoft 365, your WordPress server does not need SMTP credentials, an SMTP relay, or PHPMailer configuration. Sendelva short-circuits `wp_mail()` and delivers through the Microsoft Graph `sendMail` endpoint with an app-only OAuth token. Password resets, form notifications, and everything else that uses `wp_mail()` goes out through your real tenant, lands with proper SPF/DKIM alignment, and appears in the sender's Sent Items.
 
