@@ -1,5 +1,7 @@
 # Sendelva – Email Delivery for Microsoft 365
 
+[![Plugin version](https://img.shields.io/wordpress/plugin/v/sendelva)](https://wordpress.org/plugins/sendelva/) [![Active installs](https://img.shields.io/wordpress/plugin/installs/sendelva)](https://wordpress.org/plugins/sendelva/) [![Tested up to](https://img.shields.io/wordpress/plugin/tested/sendelva)](https://wordpress.org/plugins/sendelva/)
+
 WordPress mail through Microsoft Graph. No SMTP. Formerly Graph Mailer.
 
 If your domain's mail lives in Microsoft 365, your WordPress server does not need SMTP credentials, an SMTP relay, or PHPMailer configuration. Sendelva short-circuits `wp_mail()` and delivers through the Microsoft Graph `sendMail` endpoint with an app-only OAuth token. Password resets, form notifications, and everything else that uses `wp_mail()` goes out through your real tenant, lands with proper SPF/DKIM alignment, and appears in the sender's Sent Items.
@@ -13,6 +15,15 @@ If your domain's mail lives in Microsoft 365, your WordPress server does not nee
 - **Everything is logged.** The last 20 sends — successes and failures, with the Graph error message — are on the settings screen. A failure that was handed to the default mailer says so.
 - **HTML, cc/bcc, reply-to, and attachments** (to the 3 MB `sendMail` request limit) are supported. Every address in a header such as `Cc: a@example.com, b@example.com` is delivered, display names are kept, and an attachment keyed by name (WordPress 6.2+) is sent under that name.
 - **Mail goes out as the sender mailbox.** Graph sends as the configured mailbox, so a `From` header set by another plugin is ignored. To route replies elsewhere, such as to a contact form visitor, set `Reply-To`.
+
+## Install
+
+Sendelva is on the WordPress.org plugin directory: [wordpress.org/plugins/sendelva](https://wordpress.org/plugins/sendelva/)
+
+- **From your dashboard:** Plugins > Add New > search "Sendelva" > Install Now > Activate.
+- **With WP-CLI:** `wp plugin install sendelva --activate`
+
+Then follow the setup below.
 
 ## Setup
 
